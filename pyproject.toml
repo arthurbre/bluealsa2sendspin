@@ -26,6 +26,14 @@ dev = [
     "pre-commit>=4.0",
     "ruff>=0.9",
 ]
+test = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    # [server] pulls in what's needed to run a real SendspinServer in-process,
+    # so tests/test_integration.py exercises the client against real protocol
+    # code instead of a hand-rolled fake.
+    "aiosendspin[server]>=9.1,<9.2",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -67,6 +75,9 @@ known-first-party = ["bluealsa2sendspin"]
 [tool.ruff.format]
 # Force Linux/macOS line endings regardless of the checkout platform.
 line-ending = "lf"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.mypy]
 python_version = "3.12"

@@ -105,9 +105,13 @@ uv run pre-commit install
 
 - `uv run ruff check .` / `uv run ruff format .` — lint and format
 - `uv run mypy src` — type check
-- `uv run pre-commit run --all-files` — everything above, same as CI
+- `uv run pytest` — unit tests plus an integration test that runs a real
+  `aiosendspin` Sendspin server in-process (BlueALSA itself is faked; see
+  `tests/test_integration.py`)
+- `uv run pre-commit run --all-files` — lint/format/type-check, same as CI
 
-CI (GitHub Actions) runs the same pre-commit hooks on every push and pull request.
+CI (GitHub Actions) runs the same pre-commit hooks and the test suite on every push
+and pull request.
 
 ## License
 
