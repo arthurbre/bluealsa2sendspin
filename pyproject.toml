@@ -7,16 +7,18 @@ license = "Apache-2.0"
 requires-python = ">=3.12"
 authors = [{ name = "arthurbre" }]
 dependencies = [
-    "aiosendspin[source]>=9.1,<10",
-    "dbus-next>=0.2.3",
+    # Narrow upper bound: bluealsa2sendspin reaches into SourceCapture's private
+    # ``_connection`` to call ``send_source_signal()``, which 9.1.x has no public
+    # wrapper for. Widen once aiosendspin exposes that publicly.
+    "aiosendspin[source]>=9.1,<9.2",
+    "dbus-fast>=2.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/arthurbre/bluealsa2sendspin"
 
-# Re-added once src/bluealsa2sendspin/__main__.py exists:
-# [project.scripts]
-# bluealsa2sendspin = "bluealsa2sendspin.__main__:main"
+[project.scripts]
+bluealsa2sendspin = "bluealsa2sendspin.cli:main"
 
 [dependency-groups]
 dev = [
@@ -73,5 +75,5 @@ warn_unused_ignores = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["dbus_next.*"]
+module = ["dbus_fast.*"]
 ignore_missing_imports = true

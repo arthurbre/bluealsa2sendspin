@@ -4,7 +4,10 @@ Bridges a Bluetooth A2DP audio sink into [Music Assistant](https://music-assista
 as a [Sendspin](https://github.com/Sendspin/spec) **source** client — without going
 through PipeWire or PulseAudio.
 
-Status: early scaffolding, not yet functional.
+Status: core pairing/capture/streaming logic is implemented and verified end-to-end
+against a real Sendspin server (see [Development](#development)). The BlueALSA/D-Bus
+side is implemented against the official `org.bluealsa` interfaces but not yet
+exercised against real hardware.
 
 ## Why
 
@@ -44,22 +47,50 @@ its only dependencies are [`aiosendspin`](https://pypi.org/project/aiosendspin/)
 Sendspin protocol library) and BlueALSA. It can run on the same host as the MA server,
 or on a separate device dedicated to Bluetooth reception.
 
-Planned behavior:
+Behavior:
 
-- Open the BlueALSA PCM stream for the paired phone and feed it to a Sendspin
-  `SourceCapture` (`aiosendspin.client`).
-- Map the BlueALSA/BlueZ transport state (`idle` / `active`) to the Sendspin
-  `line_sense` signal (`SignalState.PRESENT` / `ABSENT`), so `sendspin_source`'s
-  built-in autostart/autostop (play when the phone starts streaming, stop after the
+- Discovers the BlueALSA A2DP-sink "source" PCM for whichever phone is currently
+  connected, opens its pipe over `org.bluealsa.PCM1.Open()`, and feeds it to a
+  Sendspin `SourceCapture` (`aiosendspin.client`) once the server asks for it.
+- Maps the PCM's `Running` property to the Sendspin `line_sense` signal
+  (`SignalState.PRESENT` / `ABSENT`), so `sendspin_source`'s built-in
+  autostart/autostop (play when the phone starts streaming, stop after the
   configured silence timeout) works without extra logic on the MA side.
-- Handle the Sendspin pairing handshake (PSK/PIN) with the MA server, separately from
-  the phone's own Bluetooth pairing.
+- Handles the Sendspin pairing handshake (static PIN) with the MA server, separately
+  from the phone's own Bluetooth pairing, and reconnects with exponential backoff if
+  the connection to the MA server drops.
 
 ## Requirements
 
 - Python 3.12+
 - `bluez-alsa` (`bluealsa`/`bluealsad`) running and configured as an A2DP sink
 - A Music Assistant server (2.10+) with the `sendspin_source` plugin enabled
+
+## Usage
+
+```console
+uv tool install bluealsa2sendspin
+```
+
+Pair once with the Music Assistant server:
+
+```console
+bluealsa2sendspin pair --server-url ws://ma-host:8927/sendspin
+```
+
+This prints a client ID and an 8-digit PIN, and waits (up to 5 minutes) for pairing.
+Add this source in Music Assistant and enter the PIN when prompted, then run the
+bridge itself:
+
+```console
+bluealsa2sendspin run --server-url ws://ma-host:8927/sendspin
+```
+
+`run` connects to BlueALSA over D-Bus, bridges whichever phone is currently paired
+as an A2DP source into the Sendspin connection, and keeps reconnecting to the MA
+server if the connection drops. Identity and pairing state persist under
+`$XDG_STATE_HOME/bluealsa2sendspin` (`~/.local/state/bluealsa2sendspin` by default);
+override with `--state-dir`. See `bluealsa2sendspin --help` for all options.
 
 ## Development
 
