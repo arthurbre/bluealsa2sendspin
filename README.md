@@ -61,6 +61,23 @@ Planned behavior:
 - `bluez-alsa` (`bluealsa`/`bluealsad`) running and configured as an A2DP sink
 - A Music Assistant server (2.10+) with the `sendspin_source` plugin enabled
 
+## Development
+
+Dependencies and the Python version are managed with [uv](https://docs.astral.sh/uv/),
+which provisions its own interpreter and virtualenv — no reliance on whatever Python is
+installed system-wide.
+
+```console
+uv sync --all-groups     # creates .venv, installs runtime + dev dependencies
+uv run pre-commit install
+```
+
+- `uv run ruff check .` / `uv run ruff format .` — lint and format
+- `uv run mypy src` — type check
+- `uv run pre-commit run --all-files` — everything above, same as CI
+
+CI (GitHub Actions) runs the same pre-commit hooks on every push and pull request.
+
 ## License
 
 Apache License 2.0, see [LICENSE](LICENSE).

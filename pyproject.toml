@@ -14,8 +14,16 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/arthurbre/bluealsa2sendspin"
 
-[project.scripts]
-bluealsa2sendspin = "bluealsa2sendspin.__main__:main"
+# Re-added once src/bluealsa2sendspin/__main__.py exists:
+# [project.scripts]
+# bluealsa2sendspin = "bluealsa2sendspin.__main__:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14",
+    "pre-commit>=4.0",
+    "ruff>=0.9",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -27,3 +35,43 @@ packages = ["src/bluealsa2sendspin"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+fix = true
+show-fixes = true
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "ASYNC", # flake8-async
+    "PIE",   # flake8-pie
+    "PTH",   # flake8-use-pathlib
+    "N",     # pep8-naming
+    "RUF",   # ruff-specific rules
+    "PERF",  # perflint
+]
+ignore = [
+    "COM812", # conflicts with the ruff formatter
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bluealsa2sendspin"]
+
+[tool.ruff.format]
+# Force Linux/macOS line endings regardless of the checkout platform.
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["dbus_next.*"]
+ignore_missing_imports = true
