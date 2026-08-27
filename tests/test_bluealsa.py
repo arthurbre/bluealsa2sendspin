@@ -34,14 +34,16 @@ def test_require_supported_accepts_signed_little_endian_16bit() -> None:
     assert fmt.frame_bytes == 4
 
 
-def _pcm_object(*, mode: str, sequence: int, running: bool) -> dict[str, dict[str, object]]:
+def _pcm_object(
+    *, mode: str, sequence: int, running: bool, rate_property: str = "Rate"
+) -> dict[str, dict[str, object]]:
     return {
         PCM_INTERFACE: {
             "Transport": "A2DP-sink",
             "Mode": mode,
             "Format": 0x8210,
             "Channels": 2,
-            "Rate": 44100,
+            rate_property: 44100,
             "Device": "/org/bluez/hci0/dev_AA",
             "Sequence": sequence,
             "Running": running,
@@ -67,6 +69,18 @@ def test_select_source_pcm_ignores_sink_mode_and_other_transports() -> None:
 
 def test_select_source_pcm_returns_none_when_absent() -> None:
     assert _select_source_pcm({}) is None
+
+
+def test_select_source_pcm_supports_pre_v5_sampling_property() -> None:
+    """bluealsad <5.0 (still what Debian/Raspberry Pi OS ship) calls this "Sampling"."""
+    managed = {
+        "/org/bluealsa/hci0/dev_AA/a2dpsnk/source": _pcm_object(
+            mode="source", sequence=1, running=True, rate_property="Sampling"
+        )
+    }
+    info = _select_source_pcm(managed)
+    assert info is not None
+    assert info.pcm_format.sample_rate == 44100
 
 
 def test_select_source_pcm_picks_the_highest_sequence_when_several_are_present() -> None:

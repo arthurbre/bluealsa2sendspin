@@ -148,9 +148,11 @@ def _select_source_pcm(managed_objects: dict[str, dict[str, dict[str, Any]]]) ->
             len(candidates),
         )
     path, props = max(candidates, key=lambda item: item[1]["Sequence"])
-    pcm_format = PcmFormat.decode(
-        fmt=props["Format"], rate=props["Rate"], channels=props["Channels"]
-    )
+    # bluealsad renamed this PCM1 property from "Sampling" to "Rate" in v5.0.0
+    # with no compat alias; bluealsad <5.0 (e.g. the v4.x still shipped by Debian/
+    # Raspberry Pi OS) only exposes "Sampling", so support both.
+    rate = props["Rate"] if "Rate" in props else props["Sampling"]
+    pcm_format = PcmFormat.decode(fmt=props["Format"], rate=rate, channels=props["Channels"])
     pcm_format.require_supported()
     return PcmInfo(
         object_path=path,
