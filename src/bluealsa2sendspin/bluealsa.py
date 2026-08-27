@@ -215,7 +215,11 @@ class BlueAlsaClient:
     @classmethod
     async def connect(cls) -> BlueAlsaClient:
         """Connect to the system D-Bus and confirm ``bluealsad`` is reachable."""
-        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        # negotiate_unix_fd is required: PCM1.Open() returns two file descriptors,
+        # and dbus-fast can't decode a reply carrying fds unless the connection
+        # negotiated that extension during the SASL handshake -- without it, the
+        # Open() call hangs forever waiting for a reply it can't parse.
+        bus = await MessageBus(bus_type=BusType.SYSTEM, negotiate_unix_fd=True).connect()
         client = cls(bus)
         try:
             manager = cast(_ManagerProxy, await client._get_interface(ROOT_PATH, MANAGER_INTERFACE))
