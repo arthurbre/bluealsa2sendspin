@@ -206,6 +206,7 @@ class SourceBridge:
             )
             if signal == self._reported_signal:
                 return
+            logger.info("Reporting source signal: %s", signal.value)
             await connection.send_source_signal(signal)
             self._reported_signal = signal
 
@@ -215,6 +216,7 @@ class SourceBridge:
         self._spawn(self._handle_server_command(payload.source.command))
 
     async def _handle_server_command(self, command: str) -> None:
+        logger.info("Received server command: %s", command)
         async with self._lock:
             if command == "start":
                 self._stream_requested = True
@@ -224,7 +226,10 @@ class SourceBridge:
                 await self._stop_capture()
 
     async def _ensure_capture_started(self) -> None:
-        if self._capture is not None or self._open_pcm is None:
+        if self._capture is not None:
+            return
+        if self._open_pcm is None:
+            logger.info("Server requested start, but no BlueALSA source PCM is connected")
             return
         fmt = self._open_pcm.info.pcm_format
         audio_format = SupportedAudioFormat(
@@ -238,6 +243,12 @@ class SourceBridge:
         self._capture = capture
         chunk_bytes = fmt.frame_bytes * (fmt.sample_rate * _READ_CHUNK_MS // 1000)
         self._feed_task = self._spawn(self._feed_loop(capture, self._open_pcm.reader, chunk_bytes))
+        logger.info(
+            "Started feeding capture: %d Hz, %d ch, %d-bit",
+            fmt.sample_rate,
+            fmt.channels,
+            fmt.bit_depth,
+        )
 
     async def _stop_capture(self) -> None:
         if self._feed_task is not None:
