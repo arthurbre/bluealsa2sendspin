@@ -47,8 +47,10 @@ class UnsupportedPcmFormatError(RuntimeError):
 # `BlueAlsaClient._get_interface()` casts to them at the one point that crosses from
 # dynamic to statically-typed code.
 class _ManagerProxy(Protocol):
-    async def call_version(self) -> str: ...
-    async def call_adapters(self) -> list[str]: ...
+    # Version/Adapters are Manager1 *properties* (org.bluealsa.Manager1(7)), not
+    # methods -- dbus-fast exposes properties as get_<name>(), not call_<name>().
+    async def get_version(self) -> str: ...
+    async def get_adapters(self) -> list[str]: ...
 
 
 class _ObjectManagerProxy(Protocol):
@@ -215,14 +217,14 @@ class BlueAlsaClient:
         client = cls(bus)
         try:
             manager = cast(_ManagerProxy, await client._get_interface(ROOT_PATH, MANAGER_INTERFACE))
+            version = await manager.get_version()
+            adapters = await manager.get_adapters()
         except Exception as err:
             bus.disconnect()
             raise RuntimeError(
                 "Could not reach bluealsad on the system D-Bus "
                 f"(service {SERVICE_NAME!r}); is it installed and running?"
             ) from err
-        version = await manager.call_version()
-        adapters = await manager.call_adapters()
         logger.info("Connected to bluealsad %s (adapters: %s)", version, ", ".join(adapters))
         return client
 
