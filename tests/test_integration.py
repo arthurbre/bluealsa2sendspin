@@ -1,8 +1,9 @@
-"""End-to-end check against a real aiosendspin server.
+"""End-to-end checks against a real aiosendspin server.
 
 Exercises the full lifecycle bluealsa2sendspin relies on: static-PIN pairing,
 the server activating the source role, our ``line_sense`` signal reaching it,
-a server-driven start/stop cycle, and the PCM bytes round-tripping intact.
+a server-driven start/stop cycle, the PCM bytes round-tripping intact, and
+resuming correctly after the Sendspin connection itself drops and comes back.
 BlueALSA itself is faked (`FakeBlueAlsa`) since no real hardware is available
 in CI; everything downstream of that fake is real aiosendspin protocol code.
 """
@@ -86,6 +87,20 @@ async def wait_for(condition: Callable[[], bool]) -> None:
             await asyncio.sleep(0.01)
 
 
+async def drain_and_verify(handle: Any, pcm: bytes) -> None:
+    """Consume ``handle`` until ``pcm`` worth of bytes arrive and assert a bit-exact match."""
+    drained = bytearray()
+
+    async def _drain() -> None:
+        async for chunk, _timestamp in handle:
+            drained.extend(chunk)
+            if len(drained) >= len(pcm):
+                return
+
+    await asyncio.wait_for(_drain(), timeout=5)
+    assert bytes(drained) == pcm
+
+
 @pytest_asyncio.fixture
 async def sendspin_server() -> AsyncIterator[tuple[SendspinServer, str]]:
     server = SendspinServer(
@@ -105,20 +120,15 @@ async def sendspin_server() -> AsyncIterator[tuple[SendspinServer, str]]:
         await server.close()
 
 
-async def _pair_over(url: str, state_dir: Path) -> Identity:
-    identity = load_or_create_identity(state_dir)
-    store = await open_pairing_store(state_dir)
+@pytest_asyncio.fixture
+async def paired_identity(tmp_path: Path, sendspin_server: tuple[SendspinServer, str]) -> Identity:
+    """Run ``bluealsa2sendspin pair`` for real against ``sendspin_server``."""
+    server, url = sendspin_server
+    identity = load_or_create_identity(tmp_path)
+    store = await open_pairing_store(tmp_path)
     config = await store.get_pairing_config()
     await store.store_pairing_config(dataclasses.replace(config, static_pin_enabled=True))
     await store.set_static_pin(KNOWN_PIN)
-    return identity
-
-
-async def test_pair_then_stream_end_to_end(
-    tmp_path: Path, sendspin_server: tuple[SendspinServer, str]
-) -> None:
-    server, url = sendspin_server
-    identity = await _pair_over(url, tmp_path)
 
     pair_args = Namespace(state_dir=tmp_path, server_url=url, client_name="bluealsa2sendspin-test")
     pair_task = asyncio.create_task(cli._pair(pair_args))
@@ -131,17 +141,31 @@ async def test_pair_then_stream_end_to_end(
         identity.peer_id, PairingAttempt(method=PairMethod.STATIC_PIN, pin_provider=provide_pin)
     )
     await asyncio.wait_for(pair_task, timeout=10)
+    return identity
 
-    # Reload the store fresh, as a separate `run` process invocation would,
-    # rather than reusing the pre-pairing in-memory store above.
-    store = await open_pairing_store(tmp_path)
-    client = SendspinClient(
+
+def _make_client(identity: Identity, store: Any) -> SendspinClient:
+    return SendspinClient(
         identity,
         "bluealsa2sendspin-test",
         [Roles.SOURCE],
         pairing_store=store,
         source_support=cli._source_support(),
     )
+
+
+async def test_pair_then_stream_end_to_end(
+    tmp_path: Path,
+    sendspin_server: tuple[SendspinServer, str],
+    paired_identity: Identity,
+) -> None:
+    server, url = sendspin_server
+    identity = paired_identity
+
+    # Reload the store fresh, as a separate `run` process invocation would,
+    # rather than reusing the pre-pairing in-memory store from the fixture.
+    store = await open_pairing_store(tmp_path)
+    client = _make_client(identity, store)
 
     pcm_format = PcmFormat(
         sample_rate=48000, channels=2, bit_depth=16, signed=True, big_endian=False, byte_width=2
@@ -181,21 +205,86 @@ async def test_pair_then_stream_end_to_end(
         handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
 
         pcm = sine_pcm_16bit(4800)  # 100ms @ 48kHz stereo
-        drained = bytearray()
-
-        async def _drain() -> None:
-            async for chunk, _timestamp in handle:
-                drained.extend(chunk)
-                if len(drained) >= len(pcm):
-                    return
-
-        drain_task = asyncio.create_task(_drain())
+        drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
         reader.feed_data(pcm)
-        await asyncio.wait_for(drain_task, timeout=5)
-        assert bytes(drained) == pcm
+        await drain_task
 
         source_role.request_stop()
         await wait_for(lambda: any(isinstance(e, SourceStreamEndedEvent) for e in events))
     finally:
         if client.connected:
             await client.disconnect()
+
+
+async def test_capture_resumes_after_sendspin_reconnect(
+    tmp_path: Path,
+    sendspin_server: tuple[SendspinServer, str],
+    paired_identity: Identity,
+) -> None:
+    """Regression test: a Sendspin-side disconnect must not permanently wedge streaming.
+
+    Reproduces the bug where `SourceBridge` never reset `_capture`/`_reported_signal`
+    on disconnect, so a server-requested start after any reconnect was silently
+    dropped by `_ensure_capture_started`'s "already have a capture" guard.
+    """
+    server, url = sendspin_server
+    identity = paired_identity
+    store = await open_pairing_store(tmp_path)
+    client = _make_client(identity, store)
+
+    pcm_format = PcmFormat(
+        sample_rate=48000, channels=2, bit_depth=16, signed=True, big_endian=False, byte_width=2
+    )
+    info = PcmInfo(
+        object_path="/org/bluealsa/hci0/dev_AA/a2dpsnk/source",
+        device_path="/org/bluez/hci0/dev_AA",
+        pcm_format=pcm_format,
+        running=True,
+    )
+    reader = asyncio.StreamReader()
+    bridge = SourceBridge(client, FakeBlueAlsa(info, reader))
+    await bridge.start()
+
+    await client.connect(url)
+    await wait_for(client.is_time_synchronized)
+    await bridge.on_connected()
+
+    events: list[Any] = []
+    server_client = server.get_client(identity.peer_id)
+    assert server_client is not None
+    server_client.add_event_listener(lambda _c, e: events.append(e))
+    source_role = server_client.role("source@v1")
+    assert source_role is not None
+    source_role.request_start()
+    await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
+    assert bridge._capture is not None
+
+    # Simulate the Sendspin connection dropping out from under a live stream.
+    await client.disconnect()
+    assert bridge._capture is None, "disconnect must release the now-dead capture"
+    assert bridge._reported_signal is None, "disconnect must clear the cached signal state"
+
+    # Reconnect, exactly as cli._run()'s reconnect loop would.
+    await client.connect(url)
+    await wait_for(client.is_time_synchronized)
+    await bridge.on_connected()
+
+    events.clear()
+    server_client = server.get_client(identity.peer_id)
+    assert server_client is not None
+    server_client.add_event_listener(lambda _c, e: events.append(e))
+
+    await wait_for(lambda: any(isinstance(e, SourceSignalChangedEvent) for e in events))
+
+    source_role = server_client.role("source@v1")
+    assert source_role is not None
+    source_role.request_start()
+    await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
+    handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
+
+    pcm = sine_pcm_16bit(4800)
+    drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
+    reader.feed_data(pcm)
+    await drain_task
+
+    await client.disconnect()

@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 _PIN_DIGITS = 8  # aiosendspin requires the static PIN to be exactly 8 decimal digits
 _MAX_RECONNECT_DELAY_S = 30.0
+# Bounds how long a stalled connect() (e.g. a firewalled server) can delay
+# noticing SIGTERM/SIGINT, since aiohttp's own default connect timeout is
+# multi-minute and the signal handlers only get checked between iterations.
+_CONNECT_TIMEOUT_S = 30.0
 # Matches the client SDK's own pairing-window lifetime: the operator has this long,
 # after running this command, to add the source and enter the PIN in Music Assistant.
 _PAIRING_TIMEOUT_S = 300.0
@@ -156,7 +160,18 @@ async def _run(args: argparse.Namespace) -> None:
         while not stop.is_set():
             disconnected.clear()
             try:
-                await client.connect(args.server_url)
+                async with asyncio.timeout(_CONNECT_TIMEOUT_S):
+                    await client.connect(args.server_url)
+            except TimeoutError:
+                logger.warning(
+                    "Timed out connecting to %s after %.0fs; retrying in %.0fs",
+                    args.server_url,
+                    _CONNECT_TIMEOUT_S,
+                    delay,
+                )
+                await _sleep_unless_stopped(delay, stop)
+                delay = min(delay * 2, _MAX_RECONNECT_DELAY_S)
+                continue
             except Exception:
                 logger.exception(
                     "Failed to connect to %s; retrying in %.0fs", args.server_url, delay

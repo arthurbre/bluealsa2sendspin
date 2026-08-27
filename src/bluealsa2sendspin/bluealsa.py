@@ -67,6 +67,9 @@ class _PropertiesProxy(Protocol):
     def on_properties_changed(
         self, callback: Callable[[str, dict[str, Any], list[str]], None]
     ) -> None: ...
+    def off_properties_changed(
+        self, callback: Callable[[str, dict[str, Any], list[str]], None]
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +127,7 @@ class PcmInfo:
     object_path: str
     device_path: str
     pcm_format: PcmFormat
-    running: bool
+    running: bool  # as of discovery only; OpenPcm.running is the live value once opened
 
 
 def _select_source_pcm(managed_objects: dict[str, dict[str, dict[str, Any]]]) -> PcmInfo | None:
@@ -193,6 +196,7 @@ class OpenPcm:
 
     def close(self) -> None:
         """Close the PCM pipe and controller socket."""
+        self._properties.off_properties_changed(self._on_properties_changed)
         self._transport.close()
         os.close(self._ctl_fd)
 
@@ -263,12 +267,16 @@ class BlueAlsaClient:
             _PropertiesProxy, await self._get_interface(info.object_path, PROPERTIES_INTERFACE)
         )
         pcm_fd, ctl_fd = await pcm.call_open()
-        loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader(loop=loop)
-        protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
-        transport, _ = await loop.connect_read_pipe(
-            lambda: protocol, os.fdopen(pcm_fd, "rb", buffering=0)
-        )
+        pipe = os.fdopen(pcm_fd, "rb", buffering=0)
+        try:
+            loop = asyncio.get_running_loop()
+            reader = asyncio.StreamReader(loop=loop)
+            protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
+            transport, _ = await loop.connect_read_pipe(lambda: protocol, pipe)
+        except Exception:
+            pipe.close()
+            os.close(ctl_fd)
+            raise
         return OpenPcm(
             info=info, properties=properties, reader=reader, transport=transport, ctl_fd=ctl_fd
         )
