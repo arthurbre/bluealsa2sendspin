@@ -7,9 +7,10 @@ license = "Apache-2.0"
 requires-python = ">=3.12"
 authors = [{ name = "arthurbre" }]
 dependencies = [
-    # Narrow upper bound: bluealsa2sendspin reaches into SourceCapture's private
-    # ``_connection`` to call ``send_source_signal()``, which 9.1.x has no public
-    # wrapper for. Widen once aiosendspin exposes that publicly.
+    # Narrow upper bound: bluealsa2sendspin reaches into SendspinClient's private
+    # ``_admitted_connection`` to call ``send_source_signal()``, which 9.1.x has no
+    # public wrapper for (bridge.py's ``_get_signal_connection`` guards this
+    # defensively). Widen once aiosendspin exposes that publicly.
     "aiosendspin[source]>=9.1,<9.2",
     "dbus-fast>=2.0",
 ]

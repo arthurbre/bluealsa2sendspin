@@ -16,7 +16,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Coroutine
-from typing import Any
+from typing import Any, Protocol, cast
 
 from aiosendspin.client import SendspinClient, SourceCapture
 from aiosendspin.models.core import ServerCommandPayload
@@ -29,12 +29,83 @@ logger = logging.getLogger(__name__)
 
 _READ_CHUNK_MS = 20
 
+# Keep this in sync with the aiosendspin dependency pin in pyproject.toml: it's
+# quoted in _get_signal_connection's RuntimeError so that message points straight
+# at the pin that needs bumping/re-pinning if aiosendspin's private shape below
+# ever changes.
+_AIOSENDSPIN_PIN = "aiosendspin[source]>=9.1,<9.2"
+
+# Sentinel distinguishing "attribute absent" from "attribute present but None"
+# in _get_signal_connection; a real SendspinClient always has this attribute
+# (defaulting to None until a connection is admitted), so seeing the sentinel
+# back means the attribute itself is gone.
+_MISSING: Any = object()
+
 
 def _log_task_exception(task: asyncio.Task[None]) -> None:
     if task.cancelled():
         return
     if (exc := task.exception()) is not None:
         logger.error("Unhandled error in background task", exc_info=exc)
+
+
+class _SignalConnection(Protocol):
+    """The one member ``_get_signal_connection`` needs from the admitted connection.
+
+    aiosendspin 9.1.x's ``SendspinClient`` forwards ``send_player_state``/
+    ``send_available``/``send_group_command`` to its private admitted connection as
+    public pass-throughs, but has no equivalent public wrapper for
+    ``send_source_signal()``, and ``SourceCapture`` (also reachable only via
+    ``SendspinClient``) exposes no signal-related API either. So bluealsa2sendspin
+    reaches into ``SendspinClient``'s private ``_admitted_connection`` directly --
+    see the dependency pin comment in pyproject.toml.
+
+    This narrow Protocol plus the runtime shape check in ``_get_signal_connection``
+    mean a future aiosendspin release that renames/removes either that attribute or
+    this method fails with a clear ``RuntimeError`` at the one call site that
+    depends on it, instead of a raw ``AttributeError`` surfacing from inside
+    aiosendspin.
+    """
+
+    async def send_source_signal(self, signal: SignalState) -> None: ...
+
+
+def _get_signal_connection(client: SendspinClient) -> _SignalConnection | None:
+    """Fetch ``client``'s private admitted connection, verifying its shape first.
+
+    Returns ``None`` when there's currently no admitted connection -- a normal,
+    expected state (not yet connected, or connected but not yet admitted).
+    Raises ``RuntimeError`` if the private ``_admitted_connection`` attribute or
+    its ``send_source_signal`` method is missing, which would mean a newer
+    aiosendspin release changed shape in a way bluealsa2sendspin's pin didn't
+    account for.
+
+    Re-checked on every call rather than validated once and cached: both checks
+    below are plain attribute lookups with no I/O or locking, negligible next to
+    the network send that follows a successful check, so there's no meaningful
+    overhead to re-verifying instead of trusting a cached "shape is fine" flag.
+    """
+    connection = getattr(client, "_admitted_connection", _MISSING)
+    if connection is _MISSING:
+        raise RuntimeError(
+            "aiosendspin's SendspinClient no longer has a '_admitted_connection' attribute. "
+            f"bluealsa2sendspin is pinned to {_AIOSENDSPIN_PIN} and relies on reaching into "
+            "that private attribute to call send_source_signal() (see the dependency comment "
+            "in pyproject.toml); aiosendspin's internals have changed shape and "
+            "bridge.py's _get_signal_connection() needs updating to match."
+        )
+    if connection is None:
+        return None
+    send_source_signal = getattr(connection, "send_source_signal", None)
+    if not callable(send_source_signal):
+        raise RuntimeError(
+            "aiosendspin's admitted connection object no longer has a callable "
+            f"'send_source_signal' method. bluealsa2sendspin is pinned to {_AIOSENDSPIN_PIN} "
+            "and relies on calling it directly (see the dependency comment in pyproject.toml); "
+            "aiosendspin's internals have changed shape and bridge.py's "
+            "_get_signal_connection() needs updating to match."
+        )
+    return cast(_SignalConnection, connection)
 
 
 class SourceBridge:
@@ -124,11 +195,8 @@ class SourceBridge:
         self._spawn(self._report_signal())
 
     async def _report_signal(self) -> None:
-        # aiosendspin 9.1.x has no public wrapper for send_source_signal(); see the
-        # dependency pin note in pyproject.toml for why this reaches into the
-        # client's private admitted connection instead.
         async with self._signal_lock:
-            connection = self._client._admitted_connection
+            connection = _get_signal_connection(self._client)
             if connection is None:
                 return
             signal = (
