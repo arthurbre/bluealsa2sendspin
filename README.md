@@ -1,17 +1,16 @@
 # bluealsa2sendspin
 
-Bridges a Bluetooth A2DP audio sink into [Music Assistant](https://music-assistant.io/)
+Bridges a Bluetooth A2DP audio sink into [Music Assistant](https://music-assistant.io/)'s built-in Sendspin server (or any standalone Sendspin server),
 as a [Sendspin](https://github.com/Sendspin/spec) **source** client — without going
 through PipeWire or PulseAudio.
 
 Status: core pairing/capture/streaming logic is implemented and verified end-to-end
 against a real Sendspin server (see [Development](#development)). The BlueALSA/D-Bus
-side is implemented against the official `org.bluealsa` interfaces but not yet
-exercised against real hardware.
+side is implemented against the official `org.bluealsa` interfaces and currently being exercised against real hardware.
 
 ## Why
 
-Music Assistant 2.10 introduces Sendspin, its native sync protocol, along with a
+Music Assistant 2.10 introduces major improvements in its implementation of Sendspin, its native sync protocol, along with a
 `sendspin_source` plugin that exposes any connected Sendspin client implementing the
 `source` role (line-in, turntable, microphone, Bluetooth receiver, ...) as a playable
 audio source. The Sendspin protocol itself is transport-only: it doesn't care how a
@@ -22,14 +21,14 @@ name (`bluez_input.<MAC>.N`) gets renumbered by WirePlumber across reconnects, m
 `pactl list sources` unreliable for anything long-running and headless.
 
 This project avoids that entirely by using [BlueALSA](https://github.com/arkq/bluez-alsa)
-(`bluealsa`/`bluealsad`) as the A2DP sink instead. BlueALSA talks to BlueZ directly over
+(`bluealsa`/`bluealsad`) directly as the A2DP sink instead. BlueALSA talks to BlueZ directly over
 D-Bus and exposes the PCM stream on its own `org.bluealsa` D-Bus interface — no PipeWire
 involved.
 
 ## Architecture
 
 ```
- Phone (A2DP source)
+ A2DP source (e.g. phone)
         │ Bluetooth
         ▼
    BlueZ + bluealsad  (A2DP sink profile)
@@ -38,7 +37,7 @@ involved.
  bluealsa2sendspin  (this project)
         │ Sendspin protocol (WebSocket, SOURCE role)
         ▼
- Music Assistant server  (sendspin + sendspin_source, both builtin)
+ Music Assistant server  (sendspin ;erver + sendspin_source, both builtin)
 ```
 
 Nothing on the Music Assistant server side needs to change: `sendspin` and
@@ -79,7 +78,7 @@ bluealsa2sendspin pair --server-url ws://ma-host:8927/sendspin
 ```
 
 This prints a client ID and an 8-digit PIN, and waits (up to 5 minutes) for pairing.
-Add this source in Music Assistant and enter the PIN when prompted, then run the
+Add this source in Music Assistant (it should actually appear automatically, showing a message 'This player needs to be configured' or somethinng similar) and enter the PIN when prompted, then run the
 bridge itself:
 
 ```console
