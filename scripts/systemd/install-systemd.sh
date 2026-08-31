@@ -147,7 +147,7 @@ if sudo -u "$DAEMON_USER" bash -l -c "uv tool list" 2>/dev/null | grep -q "^blue
     echo -e "${D}bluealsa2sendspin already installed, upgrading...${N}"
     sudo -u "$DAEMON_USER" bash -l -c "uv tool upgrade bluealsa2sendspin" || { echo -e "${R}Failed${N}"; exit 1; }
 else
-    sudo -u "$DAEMON_USER" bash -l -c "uv tool install bluealsa2sendspin" || { echo -e "${R}Failed${N}"; exit 1; }
+    sudo -u "$DAEMON_USER" bash -l -c "uv tool install https://github.com/arthurbre/bluealsa2sendspin" || { echo -e "${R}Failed${N}"; exit 1; }
 fi
 
 # Grab the proper bin path from uv (in case it's non-standard)
