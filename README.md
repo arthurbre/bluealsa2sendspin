@@ -67,6 +67,49 @@ Behavior:
 
 ## Usage
 
+### Install as a systemd daemon (Linux, recommended for headless devices)
+
+For headless devices like a Raspberry Pi, this installs bluealsa2sendspin with
+`uv tool install`, walks you through pairing with your Music Assistant server, and
+sets it up as a systemd service that starts automatically on boot:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/arthurbre/bluealsa2sendspin/refs/heads/main/scripts/systemd/install-systemd.sh | sudo bash
+```
+
+The installer will:
+- Create a dedicated `bluealsa2sendspin` system user (or offer to reuse your current one)
+- Install bluealsa2sendspin via `uv tool install`
+- Prompt for the Music Assistant server URL and client name, then run `pair` for you
+- Create the systemd service, offering to enable it on boot and start it (once pairing
+  has actually succeeded)
+
+**Manage the service:**
+```bash
+sudo systemctl start bluealsa2sendspin    # Start the service
+sudo systemctl stop bluealsa2sendspin     # Stop the service
+sudo systemctl status bluealsa2sendspin   # Check status
+journalctl -u bluealsa2sendspin -f        # View logs
+```
+
+**Configuration:** edit `/etc/bluealsa2sendspin/config` (`SERVER_URL`, `CLIENT_NAME`),
+then `sudo systemctl restart bluealsa2sendspin`. Identity and pairing state live in
+`~/.local/state/bluealsa2sendspin` for the daemon user and are untouched by upgrades.
+
+**Updating:** re-run the installer — it detects the existing install, upgrades it,
+restarts the service if it was running, and leaves your config and pairing state
+untouched:
+```bash
+curl -fsSL https://raw.githubusercontent.com/arthurbre/bluealsa2sendspin/refs/heads/main/scripts/systemd/install-systemd.sh | sudo bash
+```
+
+**Uninstall:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/arthurbre/bluealsa2sendspin/refs/heads/main/scripts/systemd/uninstall-systemd.sh | sudo bash
+```
+
+### Manual install
+
 ```console
 uv tool install bluealsa2sendspin
 ```
