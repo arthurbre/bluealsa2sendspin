@@ -9,7 +9,9 @@ import dataclasses
 import logging
 import secrets
 import signal
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import Any
 
 from aiosendspin.client import PairingSupport, SendspinClient
 from aiosendspin.models.source import ClientHelloSourceFeatures, ClientHelloSourceSupport
@@ -18,7 +20,7 @@ from aiosendspin.noise.trust_store import PskCategory
 
 from . import __version__
 from .bluealsa import BlueAlsaClient
-from .bridge import SourceBridge
+from .bridge import SendspinSourceAdapter, SourceBridge
 from .config import default_state_dir, load_or_create_identity, open_pairing_store
 
 logger = logging.getLogger(__name__)
@@ -145,7 +147,7 @@ async def _run(args: argparse.Namespace) -> None:
         source_support=_source_support(),
     )
     bluealsa = await BlueAlsaClient.connect()
-    bridge = SourceBridge(client, bluealsa)
+    bridge = SourceBridge(SendspinSourceAdapter(client), bluealsa)
     await bridge.start()
 
     stop = asyncio.Event()
@@ -155,40 +157,63 @@ async def _run(args: argparse.Namespace) -> None:
         loop.add_signal_handler(sig, stop.set)
     client.add_disconnect_listener(disconnected.set)
 
+    async def connect() -> None:
+        async with asyncio.timeout(_CONNECT_TIMEOUT_S):
+            await client.connect(args.server_url)
+
     try:
-        delay = 1.0
-        while not stop.is_set():
-            disconnected.clear()
-            try:
-                async with asyncio.timeout(_CONNECT_TIMEOUT_S):
-                    await client.connect(args.server_url)
-            except TimeoutError:
-                logger.warning(
-                    "Timed out connecting to %s after %.0fs; retrying in %.0fs",
-                    args.server_url,
-                    _CONNECT_TIMEOUT_S,
-                    delay,
-                )
-                await _sleep_unless_stopped(delay, stop)
-                delay = min(delay * 2, _MAX_RECONNECT_DELAY_S)
-                continue
-            except Exception:
-                logger.exception(
-                    "Failed to connect to %s; retrying in %.0fs", args.server_url, delay
-                )
-                await _sleep_unless_stopped(delay, stop)
-                delay = min(delay * 2, _MAX_RECONNECT_DELAY_S)
-                continue
-            delay = 1.0
-            logger.info("Connected to Sendspin server %s", args.server_url)
-            await bridge.on_connected()
-            await _wait_for_either(stop, disconnected)
-            if not stop.is_set():
-                logger.warning("Disconnected from %s; reconnecting", args.server_url)
+        await _run_reconnect_loop(
+            connect,
+            bridge.on_connected,
+            stop,
+            disconnected,
+            label=args.server_url,
+            max_delay=_MAX_RECONNECT_DELAY_S,
+        )
     finally:
         if client.connected:
             await client.disconnect()
         bluealsa.close()
+
+
+async def _run_reconnect_loop(
+    connect: Callable[[], Coroutine[Any, Any, None]],
+    on_connected: Callable[[], Coroutine[Any, Any, None]],
+    stop: asyncio.Event,
+    disconnected: asyncio.Event,
+    *,
+    label: str,
+    initial_delay: float = 1.0,
+    max_delay: float = _MAX_RECONNECT_DELAY_S,
+) -> None:
+    """Connect, hand off to ``on_connected``, and reconnect with exponential backoff.
+
+    Runs until ``stop`` is set. ``connect`` is called fresh on every attempt and
+    must raise (including ``TimeoutError``) on failure; ``disconnected`` is expected
+    to already be wired to the connection's own disconnect signal by the caller, so
+    a mid-stream drop is what triggers the next reconnect.
+    """
+    delay = initial_delay
+    while not stop.is_set():
+        disconnected.clear()
+        try:
+            await connect()
+        except TimeoutError:
+            logger.warning("Timed out connecting to %s; retrying in %.0fs", label, delay)
+            await _sleep_unless_stopped(delay, stop)
+            delay = min(delay * 2, max_delay)
+            continue
+        except Exception:
+            logger.exception("Failed to connect to %s; retrying in %.0fs", label, delay)
+            await _sleep_unless_stopped(delay, stop)
+            delay = min(delay * 2, max_delay)
+            continue
+        delay = initial_delay
+        logger.info("Connected to Sendspin server %s", label)
+        await on_connected()
+        await _wait_for_either(stop, disconnected)
+        if not stop.is_set():
+            logger.warning("Disconnected from %s; reconnecting", label)
 
 
 async def _sleep_unless_stopped(delay: float, stop: asyncio.Event) -> None:

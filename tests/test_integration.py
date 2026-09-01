@@ -33,41 +33,14 @@ from aiosendspin.server.roles.source.events import (
     SourceStreamStartedEvent,
 )
 from aiosendspin.server.server import SendspinServer
+from fakes import FakeBlueAlsa
 
 from bluealsa2sendspin import cli
 from bluealsa2sendspin.bluealsa import PcmFormat, PcmInfo
-from bluealsa2sendspin.bridge import SourceBridge
+from bluealsa2sendspin.bridge import SendspinSourceAdapter, SourceBridge
 from bluealsa2sendspin.config import load_or_create_identity, open_pairing_store
 
 KNOWN_PIN = "12345678"
-
-
-class FakeOpenPcm:
-    def __init__(self, info: PcmInfo, reader: asyncio.StreamReader) -> None:
-        self.info = info
-        self.running = info.running
-        self.reader = reader
-        self._callbacks: list[Callable[[bool], None]] = []
-
-    def on_running_changed(self, callback: Callable[[bool], None]) -> None:
-        self._callbacks.append(callback)
-
-    def close(self) -> None:
-        pass
-
-
-class FakeBlueAlsa:
-    def __init__(self, info: PcmInfo, reader: asyncio.StreamReader) -> None:
-        self.pcm = FakeOpenPcm(info, reader)
-
-    async def find_source_pcm(self) -> PcmInfo:
-        return self.pcm.info
-
-    async def watch_topology_changes(self, on_change: Callable[[], None]) -> None:
-        pass
-
-    async def open(self, info: PcmInfo) -> FakeOpenPcm:
-        return self.pcm
 
 
 def sine_pcm_16bit(n_samples: int, channels: int = 2) -> bytes:
@@ -177,7 +150,7 @@ async def test_pair_then_stream_end_to_end(
         running=True,
     )
     reader = asyncio.StreamReader()
-    bridge = SourceBridge(client, FakeBlueAlsa(info, reader))
+    bridge = SourceBridge(SendspinSourceAdapter(client), FakeBlueAlsa(info, reader))
     await bridge.start()
 
     try:
@@ -242,7 +215,7 @@ async def test_capture_resumes_after_sendspin_reconnect(
         running=True,
     )
     reader = asyncio.StreamReader()
-    bridge = SourceBridge(client, FakeBlueAlsa(info, reader))
+    bridge = SourceBridge(SendspinSourceAdapter(client), FakeBlueAlsa(info, reader))
     await bridge.start()
 
     await client.connect(url)
@@ -257,12 +230,13 @@ async def test_capture_resumes_after_sendspin_reconnect(
     assert source_role is not None
     source_role.request_start()
     await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
-    assert bridge._capture is not None
+    assert bridge.status().capturing
 
     # Simulate the Sendspin connection dropping out from under a live stream.
     await client.disconnect()
-    assert bridge._capture is None, "disconnect must release the now-dead capture"
-    assert bridge._reported_signal is None, "disconnect must clear the cached signal state"
+    status = bridge.status()
+    assert not status.capturing, "disconnect must release the now-dead capture"
+    assert status.reported_signal is None, "disconnect must clear the cached signal state"
 
     # Reconnect, exactly as cli._run()'s reconnect loop would.
     await client.connect(url)

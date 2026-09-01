@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from aiosendspin.client import SendspinClient, SourceCapture
@@ -23,7 +24,7 @@ from aiosendspin.models.core import ServerCommandPayload
 from aiosendspin.models.player import SupportedAudioFormat
 from aiosendspin.models.types import AudioCodec, SignalState
 
-from .bluealsa import BlueAlsaClient, OpenPcm, PcmInfo, UnsupportedPcmFormatError
+from .bluealsa import PcmInfo, UnsupportedPcmFormatError
 
 logger = logging.getLogger(__name__)
 
@@ -108,14 +109,87 @@ def _get_signal_connection(client: SendspinClient) -> _SignalConnection | None:
     return cast(_SignalConnection, connection)
 
 
+class _SourceCaptureLike(Protocol):
+    """The shape ``SourceBridge`` needs from a capture -- see aiosendspin's ``SourceCapture``."""
+
+    async def start(self) -> None: ...
+    async def feed(self, chunk: bytes) -> None: ...
+    async def stop(self) -> None: ...
+
+
+class _SendspinSource(Protocol):
+    """The shape ``SourceBridge`` needs from the Sendspin side -- see ``SendspinSourceAdapter``."""
+
+    def add_command_listener(self, callback: Callable[[ServerCommandPayload], None]) -> None: ...
+    def add_disconnect_listener(self, callback: Callable[[], None]) -> None: ...
+    def create_capture(self, audio_format: SupportedAudioFormat) -> _SourceCaptureLike: ...
+    async def report_signal(self, signal: SignalState) -> bool: ...
+
+
+class SendspinSourceAdapter:
+    """Adapts aiosendspin's ``SendspinClient`` to the ``_SendspinSource`` shape.
+
+    Seals the one piece of aiosendspin's private surface bluealsa2sendspin depends
+    on -- see ``_get_signal_connection`` -- behind a small, stable interface:
+    ``SourceBridge`` itself never touches ``SendspinClient`` or ``_SignalConnection``.
+    """
+
+    def __init__(self, client: SendspinClient) -> None:
+        self._client = client
+
+    def add_command_listener(self, callback: Callable[[ServerCommandPayload], None]) -> None:
+        self._client.add_server_command_listener(callback)
+
+    def add_disconnect_listener(self, callback: Callable[[], None]) -> None:
+        self._client.add_disconnect_listener(callback)
+
+    def create_capture(self, audio_format: SupportedAudioFormat) -> SourceCapture:
+        return self._client.create_source_capture(audio_format)
+
+    async def report_signal(self, signal: SignalState) -> bool:
+        """Send ``signal`` if a connection is currently admitted; returns whether it was sent."""
+        connection = _get_signal_connection(self._client)
+        if connection is None:
+            return False
+        await connection.send_source_signal(signal)
+        return True
+
+
+class _OpenPcmLike(Protocol):
+    """The shape ``SourceBridge`` needs from an opened PCM -- see ``bluealsa.OpenPcm``."""
+
+    info: PcmInfo
+    running: bool
+    reader: asyncio.StreamReader
+
+    def on_running_changed(self, callback: Callable[[bool], None]) -> None: ...
+    def close(self) -> None: ...
+
+
+class _SourcePcmProvider(Protocol):
+    """The shape ``SourceBridge`` needs from a BlueALSA client -- see ``BlueAlsaClient``."""
+
+    async def find_source_pcm(self) -> PcmInfo | None: ...
+    async def watch_topology_changes(self, on_change: Callable[[], None]) -> None: ...
+    async def open(self, info: PcmInfo) -> _OpenPcmLike: ...
+
+
+@dataclass(frozen=True)
+class BridgeStatus:
+    """A snapshot of what ``SourceBridge`` is currently doing."""
+
+    capturing: bool
+    reported_signal: SignalState | None
+
+
 class SourceBridge:
     """Owns the live BlueALSA PCM <-> Sendspin ``SourceCapture`` wiring for one client."""
 
-    def __init__(self, client: SendspinClient, bluealsa: BlueAlsaClient) -> None:
+    def __init__(self, client: _SendspinSource, bluealsa: _SourcePcmProvider) -> None:
         self._client = client
         self._bluealsa = bluealsa
-        self._open_pcm: OpenPcm | None = None
-        self._capture: SourceCapture | None = None
+        self._open_pcm: _OpenPcmLike | None = None
+        self._capture: _SourceCaptureLike | None = None
         self._feed_task: asyncio.Task[None] | None = None
         self._stream_requested = False
         self._reported_signal: SignalState | None = None
@@ -127,7 +201,7 @@ class SourceBridge:
 
     async def start(self) -> None:
         """Wire up listeners and reconcile against whatever BlueALSA currently reports."""
-        self._client.add_server_command_listener(self._on_server_command)
+        self._client.add_command_listener(self._on_server_command)
         self._client.add_disconnect_listener(self._on_disconnected)
         await self._bluealsa.watch_topology_changes(self._schedule_topology_sync)
         await self._sync_topology()
@@ -135,6 +209,12 @@ class SourceBridge:
     async def on_connected(self) -> None:
         """Re-announce the current signal state on a fresh (re)connection."""
         await self._report_signal()
+
+    def status(self) -> BridgeStatus:
+        """A snapshot of the currently-active capture and last-reported signal state."""
+        return BridgeStatus(
+            capturing=self._capture is not None, reported_signal=self._reported_signal
+        )
 
     def _on_disconnected(self) -> None:
         # The SourceCapture and its feed task are bound to the now-dead
@@ -196,9 +276,6 @@ class SourceBridge:
 
     async def _report_signal(self) -> None:
         async with self._signal_lock:
-            connection = _get_signal_connection(self._client)
-            if connection is None:
-                return
             signal = (
                 SignalState.PRESENT
                 if self._open_pcm is not None and self._open_pcm.running
@@ -206,8 +283,9 @@ class SourceBridge:
             )
             if signal == self._reported_signal:
                 return
+            if not await self._client.report_signal(signal):
+                return  # not yet connected/admitted; _report_signal runs again once it is
             logger.info("Reporting source signal: %s", signal.value)
-            await connection.send_source_signal(signal)
             self._reported_signal = signal
 
     def _on_server_command(self, payload: ServerCommandPayload) -> None:
@@ -238,7 +316,7 @@ class SourceBridge:
             sample_rate=fmt.sample_rate,
             bit_depth=fmt.bit_depth,
         )
-        capture = self._client.create_source_capture(audio_format)
+        capture = self._client.create_capture(audio_format)
         await capture.start()
         self._capture = capture
         chunk_bytes = fmt.frame_bytes * (fmt.sample_rate * _READ_CHUNK_MS // 1000)
@@ -262,7 +340,7 @@ class SourceBridge:
 
     @staticmethod
     async def _feed_loop(
-        capture: SourceCapture, reader: asyncio.StreamReader, chunk_bytes: int
+        capture: _SourceCaptureLike, reader: asyncio.StreamReader, chunk_bytes: int
     ) -> None:
         while True:
             try:
