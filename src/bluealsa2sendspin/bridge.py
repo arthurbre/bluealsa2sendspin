@@ -28,7 +28,7 @@ from .bluealsa import PcmInfo, UnsupportedPcmFormatError
 
 logger = logging.getLogger(__name__)
 
-_READ_CHUNK_MS = 20
+_READ_CHUNK_MS = 1000
 
 # Keep this in sync with the aiosendspin dependency pin in pyproject.toml: it's
 # quoted in _get_signal_connection's RuntimeError so that message points straight
