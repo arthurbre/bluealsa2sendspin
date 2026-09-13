@@ -95,7 +95,9 @@ class FakeSendspinSource:
 
     def simulate_server_command(self, command: str) -> None:
         assert self._command_listener is not None, "SourceBridge.start() was never called"
-        self._command_listener(ServerCommandPayload(source=SourceCommandServerPayload(command=command)))
+        self._command_listener(
+            ServerCommandPayload(source=SourceCommandServerPayload(command=command))
+        )
 
     def simulate_disconnect(self) -> None:
         assert self._disconnect_listener is not None, "SourceBridge.start() was never called"
