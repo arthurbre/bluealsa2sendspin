@@ -37,11 +37,10 @@ from fakes import FakeBlueAlsa
 
 from bluealsa2sendspin import cli
 from bluealsa2sendspin.bluealsa import PcmFormat, PcmInfo
-from bluealsa2sendspin.bridge import SendspinSourceAdapter, SourceBridge
+from bluealsa2sendspin.bridge import _READ_CHUNK_MS, SendspinSourceAdapter, SourceBridge
 from bluealsa2sendspin.config import load_or_create_identity, open_pairing_store
 
 KNOWN_PIN = "12345678"
-READ_CHUNK_MS = 1000
 
 
 def sine_pcm_16bit(n_samples: int, channels: int = 2) -> bytes:
@@ -178,7 +177,7 @@ async def test_pair_then_stream_end_to_end(
         await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
         handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
 
-        pcm = sine_pcm_16bit(5 * READ_CHUNK_MS * 4800)  # 5000ms @ 48kHz stereo
+        pcm = sine_pcm_16bit(5 * _READ_CHUNK_MS * 4800)  # exactly 5 read/feed chunks @ 48kHz stereo
         drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
         reader.feed_data(pcm)
         await drain_task
@@ -257,7 +256,7 @@ async def test_capture_resumes_after_sendspin_reconnect(
     await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
     handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
 
-    pcm = sine_pcm_16bit(5 * READ_CHUNK_MS * 4800)
+    pcm = sine_pcm_16bit(5 * _READ_CHUNK_MS * 4800)
     drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
     reader.feed_data(pcm)
     await drain_task
