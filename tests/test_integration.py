@@ -177,7 +177,7 @@ async def test_pair_then_stream_end_to_end(
         await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
         handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
 
-        pcm = sine_pcm_16bit(4800)  # 100ms @ 48kHz stereo
+        pcm = sine_pcm_16bit(5 * 48000)  # 5000ms @ 48kHz stereo
         drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
         reader.feed_data(pcm)
         await drain_task
@@ -256,7 +256,7 @@ async def test_capture_resumes_after_sendspin_reconnect(
     await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
     handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
 
-    pcm = sine_pcm_16bit(4800)
+    pcm = sine_pcm_16bit(5 * 48000)
     drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
     reader.feed_data(pcm)
     await drain_task
