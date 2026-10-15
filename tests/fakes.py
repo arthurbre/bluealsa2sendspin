@@ -51,7 +51,9 @@ class FakeBlueAlsa:
 
 
 class FakeSourceCapture:
-    def __init__(self, stop_failures: int = 0, start_fails: bool = False) -> None:
+    def __init__(
+        self, stop_failures: int = 0, start_fails: bool = False, feed_fails: bool = False
+    ) -> None:
         self.started = False
         self.stopped = False
         self.stop_attempts = 0
@@ -59,6 +61,7 @@ class FakeSourceCapture:
         self.capture_timestamps_us: list[int | None] = []
         self._stop_failures = stop_failures
         self._start_fails = start_fails
+        self._feed_fails = feed_fails
 
     async def start(self) -> None:
         if self._start_fails:
@@ -66,6 +69,8 @@ class FakeSourceCapture:
         self.started = True
 
     async def feed(self, chunk: bytes, capture_timestamp_us: int | None = None) -> None:
+        if self._feed_fails:
+            raise RuntimeError("Connection ended the stream")
         self.fed.extend(chunk)
         self.capture_timestamps_us.append(capture_timestamp_us)
 
@@ -87,6 +92,7 @@ class FakeSendspinSource:
         self.created_captures: list[FakeSourceCapture] = []
         self.capture_stop_failures = 0
         self.capture_start_fails = False
+        self.capture_feed_fails = False
         self.now_us_value = 0
         self._command_listener: Callable[[ServerCommandPayload], None] | None = None
         self._disconnect_listener: Callable[[], None] | None = None
@@ -101,7 +107,9 @@ class FakeSendspinSource:
         return self.now_us_value
 
     def create_capture(self, audio_format: SupportedAudioFormat) -> FakeSourceCapture:
-        capture = FakeSourceCapture(self.capture_stop_failures, self.capture_start_fails)
+        capture = FakeSourceCapture(
+            self.capture_stop_failures, self.capture_start_fails, self.capture_feed_fails
+        )
         self.created_captures.append(capture)
         return capture
 

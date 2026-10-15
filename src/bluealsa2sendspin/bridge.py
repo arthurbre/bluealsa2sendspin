@@ -344,7 +344,7 @@ class SourceBridge:
     async def _stop_capture(self) -> None:
         if self._feed_task is not None:
             self._feed_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._feed_task
             self._feed_task = None
         if self._capture is not None:

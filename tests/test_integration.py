@@ -23,7 +23,7 @@ import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from aiosendspin.client import SendspinClient
-from aiosendspin.models.types import PairMethod, Roles
+from aiosendspin.models.types import PairMethod, Roles, SignalState
 from aiosendspin.noise.keys import Identity
 from aiosendspin.noise.pairing import PairingAttempt
 from aiosendspin.noise.trust_store import InMemoryServerPairingStore
@@ -311,7 +311,7 @@ async def test_pcm_replacement_needs_a_fresh_server_start(
         await wait_for(lambda: any(isinstance(e, SourceStreamEndedEvent) for e in events))
         fake_bluealsa.present = True
         fake_bluealsa.simulate_topology_change()
-        await wait_for(lambda: bridge.status().reported_signal is not None)
+        await wait_for(lambda: bridge.status().reported_signal == SignalState.PRESENT)
         await asyncio.sleep(0.2)
 
         started = [e for e in events if isinstance(e, SourceStreamStartedEvent)]
