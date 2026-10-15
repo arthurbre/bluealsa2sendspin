@@ -51,18 +51,26 @@ class FakeBlueAlsa:
 
 
 class FakeSourceCapture:
-    def __init__(self) -> None:
+    def __init__(self, stop_failures: int = 0, start_fails: bool = False) -> None:
         self.started = False
         self.stopped = False
+        self.stop_attempts = 0
         self.fed = bytearray()
+        self._stop_failures = stop_failures
+        self._start_fails = start_fails
 
     async def start(self) -> None:
+        if self._start_fails:
+            raise RuntimeError("Source stream start requires a server start command")
         self.started = True
 
     async def feed(self, chunk: bytes) -> None:
         self.fed.extend(chunk)
 
     async def stop(self) -> None:
+        self.stop_attempts += 1
+        if self.stop_attempts <= self._stop_failures:
+            raise RuntimeError("Connection is busy with an in-band exchange")
         self.stopped = True
 
 
@@ -75,6 +83,8 @@ class FakeSendspinSource:
     def __init__(self) -> None:
         self.reported_signals: list[SignalState] = []
         self.created_captures: list[FakeSourceCapture] = []
+        self.capture_stop_failures = 0
+        self.capture_start_fails = False
         self._command_listener: Callable[[ServerCommandPayload], None] | None = None
         self._disconnect_listener: Callable[[], None] | None = None
 
@@ -85,7 +95,7 @@ class FakeSendspinSource:
         self._disconnect_listener = callback
 
     def create_capture(self, audio_format: SupportedAudioFormat) -> FakeSourceCapture:
-        capture = FakeSourceCapture()
+        capture = FakeSourceCapture(self.capture_stop_failures, self.capture_start_fails)
         self.created_captures.append(capture)
         return capture
 

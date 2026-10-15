@@ -265,3 +265,64 @@ async def test_capture_resumes_after_sendspin_reconnect(
     await drain_task
 
     await client.disconnect()
+
+
+async def test_pcm_replacement_needs_a_fresh_server_start(
+    tmp_path: Path,
+    sendspin_server: tuple[SendspinServer, str],
+    paired_identity: Identity,
+) -> None:
+    """Each server ``start`` authorizes one opening: the bridge must not reopen on its own."""
+    server, url = sendspin_server
+    identity = paired_identity
+    store = await open_pairing_store(tmp_path)
+    client = _make_client(identity, store)
+
+    pcm_format = PcmFormat(
+        sample_rate=48000, channels=2, bit_depth=16, signed=True, big_endian=False, byte_width=2
+    )
+    info = PcmInfo(
+        object_path="/org/bluealsa/hci0/dev_AA/a2dpsnk/source",
+        device_path="/org/bluez/hci0/dev_AA",
+        pcm_format=pcm_format,
+        running=True,
+    )
+    fake_bluealsa = FakeBlueAlsa(info, asyncio.StreamReader())
+    bridge = SourceBridge(SendspinSourceAdapter(client), fake_bluealsa)
+    await bridge.start()
+
+    try:
+        await client.connect(url)
+        await wait_for(client.is_time_synchronized)
+        await bridge.on_connected()
+
+        server_client = server.get_client(identity.peer_id)
+        assert server_client is not None
+        events: list[Any] = []
+        server_client.add_event_listener(lambda _c, e: events.append(e))
+        source_role = server_client.role("source@v1")
+        assert source_role is not None
+
+        source_role.request_start()
+        await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
+
+        fake_bluealsa.present = False
+        fake_bluealsa.simulate_topology_change()
+        await wait_for(lambda: any(isinstance(e, SourceStreamEndedEvent) for e in events))
+        fake_bluealsa.present = True
+        fake_bluealsa.simulate_topology_change()
+        await wait_for(lambda: bridge.status().reported_signal is not None)
+        await asyncio.sleep(0.2)
+
+        started = [e for e in events if isinstance(e, SourceStreamStartedEvent)]
+        assert len(started) == 1
+        assert not bridge.status().capturing
+
+        source_role.request_start()
+        await wait_for(
+            lambda: len([e for e in events if isinstance(e, SourceStreamStartedEvent)]) == 2
+        )
+        assert bridge.status().capturing
+    finally:
+        if client.connected:
+            await client.disconnect()

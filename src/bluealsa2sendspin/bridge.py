@@ -29,6 +29,8 @@ from .bluealsa import PcmInfo, UnsupportedPcmFormatError
 logger = logging.getLogger(__name__)
 
 _READ_CHUNK_MS = 500
+_STOP_ATTEMPTS = 5
+_STOP_RETRY_DELAY_S = 0.2
 
 # Keep this in sync with the aiosendspin dependency pin in pyproject.toml: it's
 # quoted in _get_signal_connection's RuntimeError so that message points straight
@@ -227,6 +229,7 @@ class SourceBridge:
             self._feed_task.cancel()
             self._feed_task = None
         self._capture = None
+        self._stream_requested = False
         self._reported_signal = None
 
     def _spawn(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
@@ -317,7 +320,13 @@ class SourceBridge:
             bit_depth=fmt.bit_depth,
         )
         capture = self._client.create_capture(audio_format)
-        await capture.start()
+        try:
+            await capture.start()
+        except RuntimeError:
+            logger.exception("Could not start capture; waiting for the next server start")
+            self._stream_requested = False
+            return
+        self._stream_requested = False
         self._capture = capture
         chunk_bytes = fmt.frame_bytes * (fmt.sample_rate * _READ_CHUNK_MS // 1000)
         self._feed_task = self._spawn(self._feed_loop(capture, self._open_pcm.reader, chunk_bytes))
@@ -335,8 +344,23 @@ class SourceBridge:
                 await self._feed_task
             self._feed_task = None
         if self._capture is not None:
-            await self._capture.stop()
+            await self._stop_with_retries(self._capture)
             self._capture = None
+
+    @staticmethod
+    async def _stop_with_retries(capture: _SourceCaptureLike) -> None:
+        for attempt in range(1, _STOP_ATTEMPTS + 1):
+            try:
+                await capture.stop()
+            except RuntimeError:
+                if attempt == _STOP_ATTEMPTS:
+                    logger.warning(
+                        "Capture did not stop after %d attempts; releasing it", _STOP_ATTEMPTS
+                    )
+                    return
+                await asyncio.sleep(_STOP_RETRY_DELAY_S)
+            else:
+                return
 
     @staticmethod
     async def _feed_loop(

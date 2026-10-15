@@ -9,11 +9,14 @@ Protocol methods SourceBridge itself calls -- so these run in milliseconds.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 
+import pytest
 from aiosendspin.models.types import SignalState
 from fakes import FakeBlueAlsa, FakeSendspinSource
 
+from bluealsa2sendspin import bridge as bridge_module
 from bluealsa2sendspin.bluealsa import PcmFormat, PcmInfo
 from bluealsa2sendspin.bridge import _READ_CHUNK_MS, SourceBridge
 
@@ -120,3 +123,119 @@ async def test_disconnect_clears_capture_and_signal_state() -> None:
     status = bridge.status()
     assert not status.capturing
     assert status.reported_signal is None
+
+
+async def test_pcm_replacement_does_not_restart_a_consumed_server_start() -> None:
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_client = FakeSendspinSource()
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+    fake_client.simulate_server_command("start")
+    await _wait_until(lambda: bridge.status().capturing)
+
+    fake_bluealsa.present = False
+    fake_bluealsa.simulate_topology_change()
+    await _wait_until(lambda: not bridge.status().capturing)
+    fake_bluealsa.present = True
+    fake_bluealsa.simulate_topology_change()
+    await _wait_until(lambda: fake_client.reported_signals[-1] == SignalState.PRESENT)
+
+    assert not bridge.status().capturing
+    assert len(fake_client.created_captures) == 1
+
+
+async def test_server_start_received_without_pcm_is_honored_once_pcm_appears() -> None:
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_bluealsa.present = False
+    fake_client = FakeSendspinSource()
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+    fake_client.simulate_server_command("start")
+    await asyncio.sleep(0.01)
+    assert not bridge.status().capturing
+
+    fake_bluealsa.present = True
+    fake_bluealsa.simulate_topology_change()
+    await _wait_until(lambda: bridge.status().capturing)
+
+    assert len(fake_client.created_captures) == 1
+
+
+async def test_disconnect_discards_a_pending_server_start() -> None:
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_bluealsa.present = False
+    fake_client = FakeSendspinSource()
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+    fake_client.simulate_server_command("start")
+    await asyncio.sleep(0.01)
+
+    fake_client.simulate_disconnect()
+    fake_bluealsa.present = True
+    fake_bluealsa.simulate_topology_change()
+    await _wait_until(lambda: bridge.status().reported_signal == SignalState.PRESENT)
+
+    assert not bridge.status().capturing
+    assert fake_client.created_captures == []
+
+
+async def test_stop_is_retried_while_the_connection_refuses_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bridge_module, "_STOP_RETRY_DELAY_S", 0.0)
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_client = FakeSendspinSource()
+    fake_client.capture_stop_failures = 2
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+    fake_client.simulate_server_command("start")
+    await _wait_until(lambda: bridge.status().capturing)
+    capture = fake_client.created_captures[0]
+
+    fake_client.simulate_server_command("stop")
+    await _wait_until(lambda: not bridge.status().capturing)
+
+    assert capture.stopped
+    assert capture.stop_attempts == 3
+
+
+async def test_capture_is_released_when_stop_keeps_failing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(bridge_module, "_STOP_RETRY_DELAY_S", 0.0)
+    caplog.set_level(logging.WARNING, logger="bluealsa2sendspin.bridge")
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_client = FakeSendspinSource()
+    fake_client.capture_stop_failures = 1000
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+    fake_client.simulate_server_command("start")
+    await _wait_until(lambda: bridge.status().capturing)
+    capture = fake_client.created_captures[0]
+
+    fake_client.simulate_server_command("stop")
+    await _wait_until(lambda: not bridge.status().capturing)
+
+    assert not capture.stopped
+    assert capture.stop_attempts == bridge_module._STOP_ATTEMPTS
+    assert any("releasing" in record.message for record in caplog.records)
+
+
+async def test_refused_capture_start_is_dropped_instead_of_retried() -> None:
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_client = FakeSendspinSource()
+    fake_client.capture_start_fails = True
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+
+    fake_client.simulate_server_command("start")
+    await _wait_until(lambda: len(fake_client.created_captures) == 1)
+    fake_bluealsa.present = False
+    fake_bluealsa.simulate_topology_change()
+    await _wait_until(lambda: fake_client.reported_signals[-1] == SignalState.ABSENT)
+    fake_bluealsa.present = True
+    fake_bluealsa.simulate_topology_change()
+    await _wait_until(lambda: fake_client.reported_signals[-1] == SignalState.PRESENT)
+
+    assert not bridge.status().capturing
+    assert len(fake_client.created_captures) == 1
