@@ -56,6 +56,7 @@ class FakeSourceCapture:
         self.stopped = False
         self.stop_attempts = 0
         self.fed = bytearray()
+        self.capture_timestamps_us: list[int | None] = []
         self._stop_failures = stop_failures
         self._start_fails = start_fails
 
@@ -64,8 +65,9 @@ class FakeSourceCapture:
             raise RuntimeError("Source stream start requires a server start command")
         self.started = True
 
-    async def feed(self, chunk: bytes) -> None:
+    async def feed(self, chunk: bytes, capture_timestamp_us: int | None = None) -> None:
         self.fed.extend(chunk)
+        self.capture_timestamps_us.append(capture_timestamp_us)
 
     async def stop(self) -> None:
         self.stop_attempts += 1
@@ -85,6 +87,7 @@ class FakeSendspinSource:
         self.created_captures: list[FakeSourceCapture] = []
         self.capture_stop_failures = 0
         self.capture_start_fails = False
+        self.now_us_value = 0
         self._command_listener: Callable[[ServerCommandPayload], None] | None = None
         self._disconnect_listener: Callable[[], None] | None = None
 
@@ -93,6 +96,9 @@ class FakeSendspinSource:
 
     def add_disconnect_listener(self, callback: Callable[[], None]) -> None:
         self._disconnect_listener = callback
+
+    def now_us(self) -> int:
+        return self.now_us_value
 
     def create_capture(self, audio_format: SupportedAudioFormat) -> FakeSourceCapture:
         capture = FakeSourceCapture(self.capture_stop_failures, self.capture_start_fails)

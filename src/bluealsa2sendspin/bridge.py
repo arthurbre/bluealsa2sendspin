@@ -28,7 +28,7 @@ from .bluealsa import PcmInfo, UnsupportedPcmFormatError
 
 logger = logging.getLogger(__name__)
 
-_READ_CHUNK_MS = 500
+_READ_CHUNK_MS = 100
 _STOP_ATTEMPTS = 5
 _STOP_RETRY_DELAY_S = 0.2
 
@@ -115,7 +115,7 @@ class _SourceCaptureLike(Protocol):
     """The shape ``SourceBridge`` needs from a capture -- see aiosendspin's ``SourceCapture``."""
 
     async def start(self) -> None: ...
-    async def feed(self, chunk: bytes) -> None: ...
+    async def feed(self, chunk: bytes, capture_timestamp_us: int | None = None) -> None: ...
     async def stop(self) -> None: ...
 
 
@@ -124,6 +124,7 @@ class _SendspinSource(Protocol):
 
     def add_command_listener(self, callback: Callable[[ServerCommandPayload], None]) -> None: ...
     def add_disconnect_listener(self, callback: Callable[[], None]) -> None: ...
+    def now_us(self) -> int: ...
     def create_capture(self, audio_format: SupportedAudioFormat) -> _SourceCaptureLike: ...
     async def report_signal(self, signal: SignalState) -> bool: ...
 
@@ -144,6 +145,9 @@ class SendspinSourceAdapter:
 
     def add_disconnect_listener(self, callback: Callable[[], None]) -> None:
         self._client.add_disconnect_listener(callback)
+
+    def now_us(self) -> int:
+        return self._client.now_us()
 
     def create_capture(self, audio_format: SupportedAudioFormat) -> SourceCapture:
         return self._client.create_source_capture(audio_format)
@@ -362,13 +366,12 @@ class SourceBridge:
             else:
                 return
 
-    @staticmethod
     async def _feed_loop(
-        capture: _SourceCaptureLike, reader: asyncio.StreamReader, chunk_bytes: int
+        self, capture: _SourceCaptureLike, reader: asyncio.StreamReader, chunk_bytes: int
     ) -> None:
         while True:
             try:
                 chunk = await reader.readexactly(chunk_bytes)
             except asyncio.IncompleteReadError:
                 return
-            await capture.feed(chunk)
+            await capture.feed(chunk, self._client.now_us() - _READ_CHUNK_MS * 1000)

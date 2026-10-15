@@ -239,3 +239,20 @@ async def test_refused_capture_start_is_dropped_instead_of_retried() -> None:
 
     assert not bridge.status().capturing
     assert len(fake_client.created_captures) == 1
+
+
+async def test_fed_chunks_are_timestamped_at_the_start_of_the_chunk() -> None:
+    reader = asyncio.StreamReader()
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), reader)
+    fake_client = FakeSendspinSource()
+    fake_client.now_us_value = 10_000_000
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+    fake_client.simulate_server_command("start")
+    await _wait_until(lambda: bridge.status().capturing)
+    capture = fake_client.created_captures[0]
+
+    reader.feed_data(bytes(CHUNK_BYTES))
+    await _wait_until(lambda: len(capture.capture_timestamps_us) == 1)
+
+    assert capture.capture_timestamps_us == [10_000_000 - _READ_CHUNK_MS * 1000]
