@@ -1,7 +1,7 @@
 """Unit tests for bridge.py's defensive access to aiosendspin's private connection.
 
 ``_get_signal_connection()`` reaches into ``SendspinClient``'s private
-``_admitted_connection`` to reach ``send_source_signal()``, since aiosendspin 9.1.x
+``_admitted_connection`` to reach ``send_source_signal()``, since aiosendspin 10.1.x
 has no public wrapper for it (see the dependency pin comment in pyproject.toml).
 These tests pin down that when aiosendspin's private shape doesn't match what
 ``_get_signal_connection`` expects, the failure is a clear, actionable

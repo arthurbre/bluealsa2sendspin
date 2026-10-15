@@ -55,7 +55,7 @@ Behavior:
   (`SignalState.PRESENT` / `ABSENT`), so `sendspin_source`'s built-in
   autostart/autostop (play when the phone starts streaming, stop after the
   configured silence timeout) works without extra logic on the MA side.
-- Handles the Sendspin pairing handshake (static PIN) with the MA server, separately
+- Handles the Sendspin pairing handshake (static pairing code) with the MA server, separately
   from the phone's own Bluetooth pairing, and reconnects with exponential backoff if
   the connection to the MA server drops.
 

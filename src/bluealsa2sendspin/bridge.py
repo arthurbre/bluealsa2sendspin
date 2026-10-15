@@ -55,7 +55,7 @@ def _log_task_exception(task: asyncio.Task[None]) -> None:
 class _SignalConnection(Protocol):
     """The one member ``_get_signal_connection`` needs from the admitted connection.
 
-    aiosendspin 9.1.x's ``SendspinClient`` forwards ``send_player_state``/
+    aiosendspin 10.1.x's ``SendspinClient`` forwards ``send_player_state``/
     ``send_available``/``send_group_command`` to its private admitted connection as
     public pass-throughs, but has no equivalent public wrapper for
     ``send_source_signal()``, and ``SourceCapture`` (also reachable only via
