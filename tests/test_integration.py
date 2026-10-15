@@ -40,7 +40,7 @@ from bluealsa2sendspin.bluealsa import PcmFormat, PcmInfo
 from bluealsa2sendspin.bridge import _READ_CHUNK_MS, SendspinSourceAdapter, SourceBridge
 from bluealsa2sendspin.config import load_or_create_identity, open_pairing_store
 
-KNOWN_PIN = "12345678"
+KNOWN_PAIRING_CODE = "12345678"
 
 
 def sine_pcm_16bit(n_samples: int, channels: int = 2) -> bytes:
@@ -100,18 +100,21 @@ async def paired_identity(tmp_path: Path, sendspin_server: tuple[SendspinServer,
     identity = load_or_create_identity(tmp_path)
     store = await open_pairing_store(tmp_path)
     config = await store.get_pairing_config()
-    await store.store_pairing_config(dataclasses.replace(config, static_pin_enabled=True))
-    await store.set_static_pin(KNOWN_PIN)
+    await store.store_pairing_config(dataclasses.replace(config, static_pairing_code_enabled=True))
+    await store.set_static_pairing_code(KNOWN_PAIRING_CODE)
 
     pair_args = Namespace(state_dir=tmp_path, server_url=url, client_name="bluealsa2sendspin-test")
     pair_task = asyncio.create_task(cli._pair(pair_args))
     await wait_for(lambda: server.get_client(identity.peer_id) is not None)
 
-    async def provide_pin() -> str:
-        return KNOWN_PIN
+    async def provide_pairing_code() -> str:
+        return KNOWN_PAIRING_CODE
 
     await server.initiate_pairing(
-        identity.peer_id, PairingAttempt(method=PairMethod.STATIC_PIN, pin_provider=provide_pin)
+        identity.peer_id,
+        PairingAttempt(
+            method=PairMethod.STATIC_PAIRING_CODE, pairing_code_provider=provide_pairing_code
+        ),
     )
     await asyncio.wait_for(pair_task, timeout=10)
     return identity

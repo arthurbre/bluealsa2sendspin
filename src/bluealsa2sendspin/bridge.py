@@ -34,7 +34,7 @@ _READ_CHUNK_MS = 500
 # quoted in _get_signal_connection's RuntimeError so that message points straight
 # at the pin that needs bumping/re-pinning if aiosendspin's private shape below
 # ever changes.
-_AIOSENDSPIN_PIN = "aiosendspin[source]>=9.1,<9.2"
+_AIOSENDSPIN_PIN = "aiosendspin[source]>=10.1,<10.2"
 
 # Sentinel distinguishing "attribute absent" from "attribute present but None"
 # in _get_signal_connection; a real SendspinClient always has this attribute

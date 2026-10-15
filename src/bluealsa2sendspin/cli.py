@@ -25,14 +25,16 @@ from .config import default_state_dir, load_or_create_identity, open_pairing_sto
 
 logger = logging.getLogger(__name__)
 
-_PIN_DIGITS = 8  # aiosendspin requires the static PIN to be exactly 8 decimal digits
+_PAIRING_CODE_DIGITS = (
+    8  # aiosendspin requires the static pairing code to be exactly 8 decimal digits
+)
 _MAX_RECONNECT_DELAY_S = 30.0
 # Bounds how long a stalled connect() (e.g. a firewalled server) can delay
 # noticing SIGTERM/SIGINT, since aiohttp's own default connect timeout is
 # multi-minute and the signal handlers only get checked between iterations.
 _CONNECT_TIMEOUT_S = 30.0
 # Matches the client SDK's own pairing-window lifetime: the operator has this long,
-# after running this command, to add the source and enter the PIN in Music Assistant.
+# after running this command, to add the source and enter the pairing code in Music Assistant.
 _PAIRING_TIMEOUT_S = 300.0
 
 
@@ -74,7 +76,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     common.add_argument("--client-name", default="bluealsa2sendspin")
 
     subparsers.add_parser(
-        "pair", parents=[common], help="Pair with a Sendspin server using a static PIN."
+        "pair", parents=[common], help="Pair with a Sendspin server using a static pairing code."
     )
     subparsers.add_parser("run", parents=[common], help="Run the BlueALSA -> Sendspin bridge.")
     return parser.parse_args(argv)
@@ -85,16 +87,18 @@ async def _pair(args: argparse.Namespace) -> None:
     store = await open_pairing_store(args.state_dir)
 
     config = await store.get_pairing_config()
-    if not config.static_pin_enabled:
-        await store.store_pairing_config(dataclasses.replace(config, static_pin_enabled=True))
-    pin = await store.static_pin()
-    if pin is None:
-        pin = "".join(secrets.choice("0123456789") for _ in range(_PIN_DIGITS))
-        await store.set_static_pin(pin)
+    if not config.static_pairing_code_enabled:
+        await store.store_pairing_config(
+            dataclasses.replace(config, static_pairing_code_enabled=True)
+        )
+    pairing_code = await store.static_pairing_code()
+    if pairing_code is None:
+        pairing_code = "".join(secrets.choice("0123456789") for _ in range(_PAIRING_CODE_DIGITS))
+        await store.set_static_pairing_code(pairing_code)
 
     print(f"Client ID: {identity.peer_id}")
-    print(f"Pairing PIN: {pin}")
-    print("Add this source in Music Assistant now and enter the PIN above.")
+    print(f"Pairing code: {pairing_code}")
+    print("Add this source in Music Assistant now and enter the pairing code above.")
     print(f"Waiting up to {_PAIRING_TIMEOUT_S:.0f}s for pairing...")
 
     client = SendspinClient(
@@ -103,7 +107,9 @@ async def _pair(args: argparse.Namespace) -> None:
         [Roles.SOURCE],
         pairing_store=store,
         source_support=_source_support(),
-        pairing_support=PairingSupport(offer_static_pin=True, secret_locations=("device",)),
+        pairing_support=PairingSupport(
+            offer_static_pairing_code=True, secret_locations=("device",)
+        ),
     )
     client.open_pairing_window()
     await client.connect(args.server_url)

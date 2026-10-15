@@ -11,7 +11,7 @@ dependencies = [
     # ``_admitted_connection`` to call ``send_source_signal()``, which 9.1.x has no
     # public wrapper for (bridge.py's ``_get_signal_connection`` guards this
     # defensively). Widen once aiosendspin exposes that publicly.
-    "aiosendspin[source]>=9.1,<9.2",
+    "aiosendspin[source]>=10.1,<10.2",
     "dbus-fast>=2.0",
 ]
 
@@ -33,7 +33,7 @@ test = [
     # [server] pulls in what's needed to run a real SendspinServer in-process,
     # so tests/test_integration.py exercises the client against real protocol
     # code instead of a hand-rolled fake.
-    "aiosendspin[server]>=9.1,<9.2",
+    "aiosendspin[server]>=10.1,<10.2",
 ]
 
 [build-system]

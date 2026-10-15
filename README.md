@@ -120,8 +120,8 @@ Pair once with the Music Assistant server:
 bluealsa2sendspin pair --server-url ws://ma-host:8927/sendspin
 ```
 
-This prints a client ID and an 8-digit PIN, and waits (up to 5 minutes) for pairing.
-Add this source in Music Assistant (it should actually appear automatically, showing a message 'This player needs to be configured' or somethinng similar) and enter the PIN when prompted, then run the
+This prints a client ID and an 8-digit pairing code, and waits (up to 5 minutes) for pairing.
+Add this source in Music Assistant (it should actually appear automatically, showing a message 'This player needs to be configured' or somethinng similar) and enter the pairing code when prompted, then run the
 bridge itself:
 
 ```console
