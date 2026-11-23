@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from typing import Literal
 
 from aiosendspin.models.core import ServerCommandPayload
 from aiosendspin.models.player import SupportedAudioFormat
@@ -117,7 +118,7 @@ class FakeSendspinSource:
         self.reported_signals.append(signal)
         return True
 
-    def simulate_server_command(self, command: str) -> None:
+    def simulate_server_command(self, command: Literal["start", "stop"]) -> None:
         assert self._command_listener is not None, "SourceBridge.start() was never called"
         self._command_listener(
             ServerCommandPayload(source=SourceCommandServerPayload(command=command))

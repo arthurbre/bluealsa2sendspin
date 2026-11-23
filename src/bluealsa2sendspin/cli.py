@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from aiosendspin.client import PairingSupport, SendspinClient
-from aiosendspin.models.source import ClientHelloSourceFeatures, ClientHelloSourceSupport
 from aiosendspin.models.types import Roles
 from aiosendspin.noise.trust_store import PskCategory
 
@@ -106,7 +105,6 @@ async def _pair(args: argparse.Namespace) -> None:
         args.client_name,
         [Roles.SOURCE],
         pairing_store=store,
-        source_support=_source_support(),
         pairing_support=PairingSupport(
             offer_static_pairing_code=True, secret_locations=("device",)
         ),
@@ -150,7 +148,6 @@ async def _run(args: argparse.Namespace) -> None:
         args.client_name,
         [Roles.SOURCE],
         pairing_store=store,
-        source_support=_source_support(),
     )
     bluealsa = await BlueAlsaClient.connect()
     bridge = SourceBridge(SendspinSourceAdapter(client), bluealsa)
@@ -234,7 +231,3 @@ async def _wait_for_either(*events: asyncio.Event) -> None:
     finally:
         for task in tasks:
             task.cancel()
-
-
-def _source_support() -> ClientHelloSourceSupport:
-    return ClientHelloSourceSupport(features=ClientHelloSourceFeatures(line_sense=True))

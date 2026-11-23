@@ -36,7 +36,7 @@ _STOP_RETRY_DELAY_S = 0.2
 # quoted in _get_signal_connection's RuntimeError so that message points straight
 # at the pin that needs bumping/re-pinning if aiosendspin's private shape below
 # ever changes.
-_AIOSENDSPIN_PIN = "aiosendspin[source]>=10.1,<10.2"
+_AIOSENDSPIN_PIN = "aiosendspin[source]>=11.0,<12"
 
 # Sentinel distinguishing "attribute absent" from "attribute present but None"
 # in _get_signal_connection; a real SendspinClient always has this attribute
@@ -55,7 +55,7 @@ def _log_task_exception(task: asyncio.Task[None]) -> None:
 class _SignalConnection(Protocol):
     """The one member ``_get_signal_connection`` needs from the admitted connection.
 
-    aiosendspin 10.1.x's ``SendspinClient`` forwards ``send_player_state``/
+    aiosendspin 11.x's ``SendspinClient`` forwards ``send_player_state``/
     ``send_available``/``send_group_command`` to its private admitted connection as
     public pass-throughs, but has no equivalent public wrapper for
     ``send_source_signal()``, and ``SourceCapture`` (also reachable only via

@@ -27,6 +27,7 @@ from aiosendspin.models.types import PairMethod, Roles, SignalState
 from aiosendspin.noise.keys import Identity
 from aiosendspin.noise.pairing import PairingAttempt
 from aiosendspin.noise.trust_store import InMemoryServerPairingStore
+from aiosendspin.server.roles import SourceV1Role
 from aiosendspin.server.roles.source.events import (
     SourceSignalChangedEvent,
     SourceStreamEndedEvent,
@@ -126,7 +127,6 @@ def _make_client(identity: Identity, store: Any) -> SendspinClient:
         "bluealsa2sendspin-test",
         [Roles.SOURCE],
         pairing_store=store,
-        source_support=cli._source_support(),
     )
 
 
@@ -174,13 +174,13 @@ async def test_pair_then_stream_end_to_end(
         assert signal_event.signal.value == "present"
 
         source_role = server_client.role("source@v1")
-        assert source_role is not None
+        assert isinstance(source_role, SourceV1Role)
         source_role.request_start()
 
         await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
         handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
 
-        pcm = sine_pcm_16bit(5 * _READ_CHUNK_MS * 4800)  # exactly 5 read/feed chunks @ 48kHz stereo
+        pcm = sine_pcm_16bit(5 * _READ_CHUNK_MS * 48)  # exactly 5 read/feed chunks @ 48kHz stereo
         drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
         reader.feed_data(pcm)
         await drain_task
@@ -230,7 +230,7 @@ async def test_capture_resumes_after_sendspin_reconnect(
     assert server_client is not None
     server_client.add_event_listener(lambda _c, e: events.append(e))
     source_role = server_client.role("source@v1")
-    assert source_role is not None
+    assert isinstance(source_role, SourceV1Role)
     source_role.request_start()
     await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
     assert bridge.status().capturing
@@ -254,12 +254,12 @@ async def test_capture_resumes_after_sendspin_reconnect(
     await wait_for(lambda: any(isinstance(e, SourceSignalChangedEvent) for e in events))
 
     source_role = server_client.role("source@v1")
-    assert source_role is not None
+    assert isinstance(source_role, SourceV1Role)
     source_role.request_start()
     await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))
     handle = next(e for e in events if isinstance(e, SourceStreamStartedEvent)).handle
 
-    pcm = sine_pcm_16bit(5 * _READ_CHUNK_MS * 4800)
+    pcm = sine_pcm_16bit(5 * _READ_CHUNK_MS * 48)
     drain_task = asyncio.create_task(drain_and_verify(handle, pcm))
     reader.feed_data(pcm)
     await drain_task
@@ -301,7 +301,7 @@ async def test_pcm_replacement_needs_a_fresh_server_start(
         events: list[Any] = []
         server_client.add_event_listener(lambda _c, e: events.append(e))
         source_role = server_client.role("source@v1")
-        assert source_role is not None
+        assert isinstance(source_role, SourceV1Role)
 
         source_role.request_start()
         await wait_for(lambda: any(isinstance(e, SourceStreamStartedEvent) for e in events))

@@ -3,7 +3,6 @@ from pathlib import Path
 from aiosendspin.client import SendspinClient
 from aiosendspin.models.types import Roles
 
-from bluealsa2sendspin.cli import _source_support
 from bluealsa2sendspin.config import load_or_create_identity, open_pairing_store
 
 
@@ -22,7 +21,6 @@ async def test_open_pairing_store_backs_a_source_client(tmp_path: Path) -> None:
         "bluealsa2sendspin-test",
         [Roles.SOURCE],
         pairing_store=store,
-        source_support=_source_support(),
     )
     assert client.roles == [Roles.SOURCE]
     assert client.identity.peer_id == identity.peer_id

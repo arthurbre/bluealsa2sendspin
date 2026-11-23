@@ -117,7 +117,7 @@ wheels = [
 
 [[package]]
 name = "aiosendspin"
-version = "10.3.0"
+version = "11.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -128,9 +128,9 @@ dependencies = [
     { name = "orjson" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/58/52/0cb424956fa11962b0406b03b228c918c063d6dc020c850174b5109aebf0/aiosendspin-10.3.0.tar.gz", hash = "sha256:522b8d1ba65f0d66c962a393cf255df0fecd8045ff80a99930cb9eb7d2c5dffc", size = 352205, upload-time = "2026-11-02T15:30:42.299Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/78/9e80d84b23db751814812fbcac538322ba94ef0f1b43dd184993c5ffcc1d/aiosendspin-11.0.0.tar.gz", hash = "sha256:bcc9c994cb426f260547eefab35fa5736d965fa7125caa97337299887422e0db", size = 367707, upload-time = "2026-11-23T18:21:05.073Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/5f/96297d664cd42f1450e6ecb27ea412a687606f495900c7422644c9faec55/aiosendspin-10.3.0-py3-none-any.whl", hash = "sha256:1c5b39221c2912792bdf25c1c6a115814d02f36232d174cb5927b15bdd43dff6", size = 360157, upload-time = "2026-11-02T15:30:40.473Z" },
+    { url = "https://files.pythonhosted.org/packages/42/91/bfffa1deb0104d80dfc97dd1d58da032627f48f9ca8a798d7d3a9c63e2d5/aiosendspin-11.0.0-py3-none-any.whl", hash = "sha256:a2cf7a5a659bdcff1395d97ba69ab1082bc750173f90804967e56bae2dcecf96", size = 375234, upload-time = "2026-11-23T18:21:03.838Z" },
 ]
 
 [package.optional-dependencies]
@@ -279,7 +279,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiosendspin", extras = ["source"], specifier = ">=10.3" },
+    { name = "aiosendspin", extras = ["source"], specifier = ">=11.0,<12" },
     { name = "dbus-fast", specifier = ">=2.0" },
 ]
 
@@ -290,7 +290,7 @@ dev = [
     { name = "ruff", specifier = ">=0.9" },
 ]
 test = [
-    { name = "aiosendspin", extras = ["server"], specifier = ">=10.3" },
+    { name = "aiosendspin", extras = ["server"], specifier = ">=11.0,<12" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
 ]
