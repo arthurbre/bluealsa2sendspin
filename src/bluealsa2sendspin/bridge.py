@@ -165,11 +165,7 @@ class SendspinSourceAdapter:
             await connection.send_source_signal(SignalState.ABSENT)
 
     async def report_signal(self, signal: SignalState) -> bool:
-        """Send ``signal`` once the connection's clock is synchronized; returns whether it was sent.
-
-        Before that, aiosendspin only stores the signal and folds it into the initial
-        ``client/state``, which would hide the ``absent -> present`` transition.
-        """
+        """Send ``signal`` once the clock is synchronized; returns whether it was sent."""
         if not self._client.is_time_synchronized():
             return False
         connection = _get_signal_connection(self._client)
@@ -232,12 +228,10 @@ class SourceBridge:
         await self._sync_topology()
 
     async def on_connected(self) -> None:
-        """Announce ``ABSENT`` on a fresh (re)connection, then the current signal state.
-
-        Music Assistant only autostarts on an ``absent -> present`` transition, so a
-        phone already streaming when the connection comes up must still produce one.
-        """
+        """Announce ``ABSENT`` on a fresh (re)connection, then the current signal state."""
         await self._client.reset_signal()
+        if self._signal_announcement is not None:
+            self._signal_announcement.cancel()
         self._signal_announcement = self._spawn(self._report_signal_once_time_synchronized())
 
     def status(self) -> BridgeStatus:
@@ -306,7 +300,6 @@ class SourceBridge:
         await self._report_signal()
 
     async def _report_signal_once_time_synchronized(self) -> None:
-        # aiosendspin exposes no time-sync event to await instead.
         while not self._client.is_time_synchronized():  # noqa: ASYNC110
             await asyncio.sleep(_TIME_SYNC_POLL_S)
         await self._report_signal()
