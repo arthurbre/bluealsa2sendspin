@@ -33,7 +33,7 @@ from aiosendspin.server.roles.source.events import (
     SourceStreamEndedEvent,
     SourceStreamStartedEvent,
 )
-from aiosendspin.server.server import SendspinServer
+from aiosendspin.server.server import ClientConnectedEvent, SendspinServer
 from fakes import FakeBlueAlsa
 
 from bluealsa2sendspin import cli
@@ -323,6 +323,54 @@ async def test_pcm_replacement_needs_a_fresh_server_start(
             lambda: len([e for e in events if isinstance(e, SourceStreamStartedEvent)]) == 2
         )
         assert bridge.status().capturing
+    finally:
+        if client.connected:
+            await client.disconnect()
+
+
+async def test_already_streaming_phone_reaches_server_as_absent_then_present(
+    tmp_path: Path,
+    sendspin_server: tuple[SendspinServer, str],
+    paired_identity: Identity,
+) -> None:
+    """Music Assistant only autostarts on an ``absent -> present`` transition (issue #1)."""
+    server, url = sendspin_server
+    identity = paired_identity
+    store = await open_pairing_store(tmp_path)
+    client = _make_client(identity, store)
+
+    pcm_format = PcmFormat(
+        sample_rate=48000, channels=2, bit_depth=16, signed=True, big_endian=False, byte_width=2
+    )
+    info = PcmInfo(
+        object_path="/org/bluealsa/hci0/dev_AA/a2dpsnk/source",
+        device_path="/org/bluez/hci0/dev_AA",
+        pcm_format=pcm_format,
+        running=True,
+    )
+    bridge = SourceBridge(SendspinSourceAdapter(client), FakeBlueAlsa(info, asyncio.StreamReader()))
+    await bridge.start()
+
+    signals: list[SignalState] = []
+
+    def record_signal(_client: Any, event: Any) -> None:
+        if isinstance(event, SourceSignalChangedEvent):
+            signals.append(event.signal)
+
+    def watch_client(_server: SendspinServer, event: Any) -> None:
+        if isinstance(event, ClientConnectedEvent):
+            server_client = server.get_client(event.client_id)
+            assert server_client is not None
+            server_client.add_event_listener(record_signal)
+
+    server.add_event_listener(watch_client)
+
+    try:
+        await client.connect(url)
+        await bridge.on_connected()
+        await wait_for(lambda: SignalState.PRESENT in signals)
+
+        assert signals == [SignalState.ABSENT, SignalState.PRESENT]
     finally:
         if client.connected:
             await client.disconnect()
