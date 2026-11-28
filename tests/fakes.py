@@ -90,6 +90,8 @@ class FakeSendspinSource:
 
     def __init__(self) -> None:
         self.reported_signals: list[SignalState] = []
+        self.signal_resets = 0
+        self.time_synchronized = True
         self.created_captures: list[FakeSourceCapture] = []
         self.capture_stop_failures = 0
         self.capture_start_fails = False
@@ -114,7 +116,15 @@ class FakeSendspinSource:
         self.created_captures.append(capture)
         return capture
 
+    def is_time_synchronized(self) -> bool:
+        return self.time_synchronized
+
+    async def reset_signal(self) -> None:
+        self.signal_resets += 1
+
     async def report_signal(self, signal: SignalState) -> bool:
+        if not self.time_synchronized:
+            return False
         self.reported_signals.append(signal)
         return True
 

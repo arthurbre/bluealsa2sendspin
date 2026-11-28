@@ -55,6 +55,43 @@ async def test_start_syncs_topology_and_reports_initial_signal() -> None:
     assert not status.capturing
 
 
+async def test_on_connected_resets_signal_and_reports_it_once_time_is_synchronized() -> None:
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_client = FakeSendspinSource()
+    fake_client.time_synchronized = False
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+
+    await bridge.on_connected()
+    await asyncio.sleep(0.01)
+
+    assert fake_client.signal_resets == 1
+    assert fake_client.reported_signals == []
+    assert bridge.status().reported_signal is None
+
+    fake_client.time_synchronized = True
+    await _wait_until(lambda: fake_client.reported_signals == [SignalState.PRESENT])
+    assert bridge.status().reported_signal == SignalState.PRESENT
+
+
+async def test_disconnect_before_time_sync_drops_the_pending_signal_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bridge_module, "_TIME_SYNC_POLL_S", 0.001)
+    fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), asyncio.StreamReader())
+    fake_client = FakeSendspinSource()
+    fake_client.time_synchronized = False
+    bridge = SourceBridge(fake_client, fake_bluealsa)
+    await bridge.start()
+    await bridge.on_connected()
+
+    fake_client.simulate_disconnect()
+    fake_client.time_synchronized = True
+    await asyncio.sleep(0.05)
+
+    assert fake_client.reported_signals == []
+
+
 async def test_server_start_command_starts_feeding_capture() -> None:
     reader = asyncio.StreamReader()
     fake_bluealsa = FakeBlueAlsa(_pcm_info(running=True), reader)

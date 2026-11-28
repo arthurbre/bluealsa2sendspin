@@ -55,6 +55,9 @@ Behavior:
   (`SignalState.PRESENT` / `ABSENT`), so `sendspin_source`'s built-in
   autostart/autostop (play when the phone starts streaming, stop after the
   configured silence timeout) works without extra logic on the MA side.
+  Since MA only autostarts on an `absent` -> `present` transition, every (re)connection
+  to the MA server reports `absent` first, so a phone that is already streaming still
+  starts playback. Disable autostart in the player's MA settings if that's unwanted.
 - Handles the Sendspin pairing handshake (static pairing code) with the MA server, separately
   from the phone's own Bluetooth pairing, and reconnects with exponential backoff if
   the connection to the MA server drops.

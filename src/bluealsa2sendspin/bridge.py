@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _READ_CHUNK_MS = 100
 _STOP_ATTEMPTS = 5
 _STOP_RETRY_DELAY_S = 0.2
+_TIME_SYNC_POLL_S = 0.1
 
 # Keep this in sync with the aiosendspin dependency pin in pyproject.toml: it's
 # quoted in _get_signal_connection's RuntimeError so that message points straight
@@ -126,6 +127,8 @@ class _SendspinSource(Protocol):
     def add_disconnect_listener(self, callback: Callable[[], None]) -> None: ...
     def now_us(self) -> int: ...
     def create_capture(self, audio_format: SupportedAudioFormat) -> _SourceCaptureLike: ...
+    def is_time_synchronized(self) -> bool: ...
+    async def reset_signal(self) -> None: ...
     async def report_signal(self, signal: SignalState) -> bool: ...
 
 
@@ -152,8 +155,23 @@ class SendspinSourceAdapter:
     def create_capture(self, audio_format: SupportedAudioFormat) -> SourceCapture:
         return self._client.create_source_capture(audio_format)
 
+    def is_time_synchronized(self) -> bool:
+        return self._client.is_time_synchronized()
+
+    async def reset_signal(self) -> None:
+        """Make the connection's initial ``client/state`` carry ``ABSENT``."""
+        connection = _get_signal_connection(self._client)
+        if connection is not None:
+            await connection.send_source_signal(SignalState.ABSENT)
+
     async def report_signal(self, signal: SignalState) -> bool:
-        """Send ``signal`` if a connection is currently admitted; returns whether it was sent."""
+        """Send ``signal`` once the connection's clock is synchronized; returns whether it was sent.
+
+        Before that, aiosendspin only stores the signal and folds it into the initial
+        ``client/state``, which would hide the ``absent -> present`` transition.
+        """
+        if not self._client.is_time_synchronized():
+            return False
         connection = _get_signal_connection(self._client)
         if connection is None:
             return False
@@ -197,6 +215,7 @@ class SourceBridge:
         self._open_pcm: _OpenPcmLike | None = None
         self._capture: _SourceCaptureLike | None = None
         self._feed_task: asyncio.Task[None] | None = None
+        self._signal_announcement: asyncio.Task[None] | None = None
         self._stream_requested = False
         self._reported_signal: SignalState | None = None
         # Guards topology (dis)connection and capture start/stop against each
@@ -213,8 +232,13 @@ class SourceBridge:
         await self._sync_topology()
 
     async def on_connected(self) -> None:
-        """Re-announce the current signal state on a fresh (re)connection."""
-        await self._report_signal()
+        """Announce ``ABSENT`` on a fresh (re)connection, then the current signal state.
+
+        Music Assistant only autostarts on an ``absent -> present`` transition, so a
+        phone already streaming when the connection comes up must still produce one.
+        """
+        await self._client.reset_signal()
+        self._signal_announcement = self._spawn(self._report_signal_once_time_synchronized())
 
     def status(self) -> BridgeStatus:
         """A snapshot of the currently-active capture and last-reported signal state."""
@@ -232,6 +256,9 @@ class SourceBridge:
         if self._feed_task is not None:
             self._feed_task.cancel()
             self._feed_task = None
+        if self._signal_announcement is not None:
+            self._signal_announcement.cancel()
+            self._signal_announcement = None
         self._capture = None
         self._stream_requested = False
         self._reported_signal = None
@@ -278,6 +305,12 @@ class SourceBridge:
             self._open_pcm = None
         await self._report_signal()
 
+    async def _report_signal_once_time_synchronized(self) -> None:
+        # aiosendspin exposes no time-sync event to await instead.
+        while not self._client.is_time_synchronized():  # noqa: ASYNC110
+            await asyncio.sleep(_TIME_SYNC_POLL_S)
+        await self._report_signal()
+
     def _on_running_changed(self, _running: bool) -> None:
         self._spawn(self._report_signal())
 
@@ -291,7 +324,7 @@ class SourceBridge:
             if signal == self._reported_signal:
                 return
             if not await self._client.report_signal(signal):
-                return  # not yet connected/admitted; _report_signal runs again once it is
+                return  # not yet admitted and synchronized; on_connected reports it once it is
             logger.info("Reporting source signal: %s", signal.value)
             self._reported_signal = signal
 
